@@ -1,0 +1,12 @@
+name: Feature Request
+description: Suggest an idea or feature for Codex Security Linter
+title: "[FEATURE] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: feature
+    attributes:
+      label: Feature Proposal
+      description: A clear and concise description of what you would like to happen.
+    validations:
+      required: true
