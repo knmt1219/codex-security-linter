@@ -1,0 +1,43 @@
+name: 'Codex Security Linter'
+description: 'AI-powered security linter for Pull Requests that detects secrets, vulnerabilities, and suggests security patches.'
+author: 'Codex'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  github-token:
+    description: 'GitHub token with permission to read PRs and write comments (e.g. secrets.GITHUB_TOKEN)'
+    required: true
+  openai-api-key:
+    description: 'OpenAI API key for LLM-based security analysis'
+    required: true
+  openai-model:
+    description: 'OpenAI model to use for scanning'
+    required: false
+    default: 'gpt-4o'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r ${{ github.action_path }}/requirements.txt
+
+    - name: Run Codex Security Scanner
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        OPENAI_MODEL: ${{ inputs.openai-model }}
+        GITHUB_EVENT_PATH: ${{ github.event_path }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: |
+        python ${{ github.action_path }}/scanner.py
