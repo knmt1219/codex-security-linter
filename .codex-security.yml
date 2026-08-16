@@ -1,0 +1,13 @@
+# Codex Security Linter Configuration
+version: 1.0
+settings:
+  model: "gpt-4o-mini"
+  severity_threshold: "MEDIUM"
+ignore_paths:
+  - "tests/*"
+  - "docs/*"
+  - "*.lock"
+rules:
+  secret_leak_detection: true
+  injection_flaws: true
+  deserialization_risks: true

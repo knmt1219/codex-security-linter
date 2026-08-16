@@ -1,46 +1,73 @@
 import os
+import sys
 import json
+import argparse
 import requests
 from openai import OpenAI
 
 def get_pr_diff(repo_full_name: str, pr_number: int, github_token: str) -> str:
     url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}"
-    headers = {
-        "Authorization": f"Bearer {github_token}",
-        "Accept": "application/vnd.github.v3.diff",
-    }
+    headers = {"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github.v3.diff"}
     res = requests.get(url, headers=headers, timeout=30)
     return res.text if res.status_code == 200 else ""
 
 def post_comment(repo_full_name: str, pr_number: int, github_token: str, body: str) -> bool:
     url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
-    headers = {
-        "Authorization": f"Bearer {github_token}",
-        "Accept": "application/vnd.github.v3+json",
-    }
+    headers = {"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github.v3+json"}
     res = requests.post(url, headers=headers, json={"body": body}, timeout=30)
     return res.status_code == 201
 
-def build_audit_prompt(diff_text: str) -> str:
-    return (
-        "You are an application security expert reviewing an open-source Pull Request.\n"
-        "Audit the following code diff for security concerns:\n"
-        "1. Hardcoded secrets, API keys, tokens, or credentials.\n"
-        "2. Injection vulnerabilities (SQLi, XSS, Command Injection, SSRF).\n"
-        "3. Insecure deserialization, memory safety risks, or broken access control.\n"
-        "4. Provide concrete, copy-pasteable remediation code snippets.\n"
-        "If the diff contains no security issues, explicitly state that no vulnerabilities were detected.\n\n"
+def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-mini") -> str:
+    client = OpenAI(api_key=api_key)
+    prompt = (
+        "You are an application security expert auditing an open-source Pull Request.\n"
+        "Analyze the following code diff and report:\n"
+        "1. [SEVERITY: CRITICAL/HIGH/MEDIUM/LOW] Summary of found risks (Secret leaks, SQLi, XSS, RCE, SSRF).\n"
+        "2. Concrete remediation code patches (Before vs After).\n"
+        "3. Best practices recommendation.\n"
+        "If no vulnerabilities are detected, state: 'No security vulnerabilities detected.'\n\n"
         f"Diff:\n```diff\n{diff_text[:12000]}\n```"
     )
+    res = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": "You are a specialized security audit agent for open-source repositories."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.1,
+    )
+    return res.choices[0].message.content
 
 def main():
-    github_token = os.environ.get("GITHUB_TOKEN")
-    openai_api_key = os.environ.get("OPENAI_API_KEY")
-    model_name = os.environ.get("MODEL_NAME", "gpt-4o-mini")
-    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    parser = argparse.ArgumentParser(description="Codex Security Linter CLI & GitHub Action")
+    parser.add_argument("--local", action="store_true", help="Run scan on local git diff")
+    args = parser.parse_args()
 
-    if not (github_token and openai_api_key and event_path):
-        print("Missing required environment variables.")
+    api_key = os.environ.get("OPENAI_API_KEY")
+    model_name = os.environ.get("MODEL_NAME", "gpt-4o-mini")
+
+    if not api_key:
+        print("Error: OPENAI_API_KEY environment variable is required.", file=sys.stderr)
+        sys.exit(1)
+
+    if args.local:
+        # Chế độ quét cục bộ trên máy
+        diff_text = os.popen("git diff HEAD~1").read()
+        if not diff_text.strip():
+            diff_text = os.popen("git diff").read()
+        if not diff_text.strip():
+            print("No local git changes detected to audit.")
+            return
+        print("🔍 Auditing local git diff...")
+        report = audit_diff_with_ai(diff_text, api_key, model_name)
+        print("\n" + report)
+        return
+
+    # Chế độ chạy trên GitHub Action
+    token = os.environ.get("GITHUB_TOKEN")
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not (token and event_path):
+        print("Error: GITHUB_TOKEN and GITHUB_EVENT_PATH are required in Action mode.", file=sys.stderr)
         return
 
     with open(event_path, "r", encoding="utf-8") as f:
@@ -51,33 +78,20 @@ def main():
         print("Not a pull request event.")
         return
 
-    pr_number = pr_data["number"]
     repo_full_name = event_data["repository"]["full_name"]
-    diff_text = get_pr_diff(repo_full_name, pr_number, github_token)
-
+    pr_number = pr_data["number"]
+    diff_text = get_pr_diff(repo_full_name, pr_number, token)
     if not diff_text.strip():
         print("Empty or inaccessible diff.")
         return
 
-    client = OpenAI(api_key=openai_api_key)
-    prompt = build_audit_prompt(diff_text)
-
-    res = client.chat.completions.create(
-        model=model_name,
-        messages=[
-            {"role": "system", "content": "You are a specialized open-source security audit agent."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.1,
-    )
-
-    audit_result = res.choices[0].message.content
+    report = audit_diff_with_ai(diff_text, api_key, model_name)
     comment_body = (
         "### 🛡️ Codex Security Audit Report\n\n"
-        f"{audit_result}\n\n"
+        f"{report}\n\n"
         "---\n*Automated audit powered by [codex-security-linter](https://github.com/knmt1219/codex-security-linter)*"
     )
-    post_comment(repo_full_name, pr_number, github_token, comment_body)
+    post_comment(repo_full_name, pr_number, token, comment_body)
     print("Security audit posted successfully.")
 
 if __name__ == "__main__":
