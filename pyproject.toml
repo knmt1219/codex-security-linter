@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-security-linter"
-version = "1.4.0"
+version = "1.5.0"
 description = "Automated AI-powered security linter & vulnerability auditor for Git repositories and Pull Requests."
 readme = "README.md"
 authors = [{ name = "Hồ Minh Tuấn", email = "minhtuanho120912@gmail.com" }]

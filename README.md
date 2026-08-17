@@ -1,11 +1,11 @@
 # Codex Security Linter 🛡️
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://img.shields.io/badge/Release-v1.4.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
+[![Release](https://img.shields.io/badge/Release-v1.5.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-Security%20Linter-purple.svg)](https://github.com/marketplace)
 
-An open-source security linter that operates as a **GitHub Action**, **Pre-commit Hook**, and **Local CLI Tool** to detect secret leaks, injection flaws, and vulnerabilities across code diffs with automated remediation suggestions and SARIF reporting.
+An open-source security linter that operates as a **GitHub Action**, **Pre-commit Hook**, and **Local CLI Tool** to detect secret leaks, injection flaws, and vulnerabilities across code diffs with automated remediation suggestions, secret masking, and SARIF reporting.
 
 ---
 
@@ -14,8 +14,8 @@ An open-source security linter that operates as a **GitHub Action**, **Pre-commi
 ```mermaid
 graph LR
     A[Git Diff / PR] --> B[codex-security-linter]
-    B --> C{AI Security Engine}
-    C -->|Secret Leak| D[Flag Hardcoded Secret]
+    B --> C{AI & Heuristic Engine}
+    C -->|Secret Leak| D[Mask Secret & Report]
     C -->|Vulnerabilities| E[Propose Fix Code]
     D & E --> F[Post PR Comment / SARIF / CLI Output]
 ```
@@ -24,11 +24,12 @@ graph LR
 
 ## ✨ Key Features
 
-- **Secret & Token Leak Detection**: Instantly catches hardcoded API keys, private certificates, and tokens with rapid regex heuristics.
+- **Secret & Token Leak Detection with Masking**: Catches hardcoded API keys, private certificates, and tokens with rapid regex heuristics, automatically masking sensitive values (`AKIA...12`).
 - **Vulnerability Auditing**: Analyzes code diffs for SQLi, XSS, Command Injection, and SSRF flaws using LLMs.
 - **Remediation Suggestions**: Generates secure code replacements with GitHub suggestion formatting directly in PR comments.
+- **Strict Mode (`--strict`)**: Enforces strict CI gatekeeping by returning exit code `1` when critical/high risks are detected.
+- **Pre-commit Auto-Installer (`--install-hook`)**: Quickly scaffolds `.pre-commit-config.yaml` for your repository in one command.
 - **SARIF Report Export**: Generates industry-standard SARIF reports (`--sarif`) for GitHub Code Scanning integration.
-- **Pre-commit Hook Support**: Prevents insecure commits locally before they reach the repository.
 - **Flexible Runtimes**: Works as a Python package (`pip install .`), GitHub Action, or standalone CLI.
 
 ---
@@ -47,8 +48,14 @@ export OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
 # 3. Run audit on local git diff
 codex-security-linter --local
 
-# 4. Optional: Export scan results to SARIF
+# 4. Enforce strict exit code on security flaws
+codex-security-linter --local --strict
+
+# 5. Export scan results to SARIF
 codex-security-linter --local --sarif results.sarif
+
+# 6. Auto-generate pre-commit configuration
+codex-security-linter --install-hook
 ```
 
 ---
@@ -60,7 +67,7 @@ Add Codex Security Linter to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/knmt1219/codex-security-linter
-    rev: v1.4.0
+    rev: v1.5.0
     hooks:
       - id: codex-security-linter
 ```
@@ -82,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: knmt1219/codex-security-linter@v1.4.0
+      - uses: knmt1219/codex-security-linter@v1.5.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
