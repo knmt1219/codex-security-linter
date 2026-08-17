@@ -4,8 +4,9 @@
 [![Release](https://img.shields.io/badge/Release-v1.8.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-Security%20Linter-purple.svg)](https://github.com/marketplace)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/knmt1219/codex-security-linter)
 
-An open-source security linter that operates as a **GitHub Action**, **Pre-commit Hook**, and **Local CLI Tool** to detect secret leaks, injection flaws, and vulnerabilities across code diffs with executive summary matrix tables, CVSS impact scoring, confidence estimation, JSON/SARIF export, and SVG status badges.
+**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, and security vulnerabilities across code diffs with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, SVG status badges, and SARIF/JSON reporting.
 
 ---
 
@@ -13,7 +14,7 @@ An open-source security linter that operates as a **GitHub Action**, **Pre-commi
 
 ```mermaid
 graph LR
-    A[Git Diff / PR] --> B[codex-security-linter]
+    A[Git Diff / Pull Request] --> B[codex-security-linter]
     B --> C{AI & Heuristic Engine v1.8.0}
     C -->|Secret Leak| D[Mask Secret & CVSS/Confidence Scoring]
     C -->|Vulnerabilities| E[Propose Fix Code & SVG Badge]
@@ -24,47 +25,198 @@ graph LR
 
 ## ✨ Key Features
 
-- **Executive Security Summary Table**: Formats all audit findings into a high-visibility Markdown matrix table (Severity badge, Type, CVSS, Confidence %, Code snippet).
-- **Multi-Format Export Support**: Exports findings to industry-standard **SARIF** (`--sarif`) and structured **JSON** (`--json`) formats.
-- **Secret & Token Leak Detection with Masking**: Catches hardcoded API keys, private certificates, and tokens with rapid regex heuristics, automatically masking sensitive values (`AKIA...12`).
-- **CVSS Impact Scoring & Confidence Matrix**: Assigns standard CVSS 3.1 severity scores and confidence percentages to all detected security findings.
-- **Dynamic SVG Security Badges (`--badge`)**: Generates embeddable status badges (`security audit: passed / issues found`) for CI workflows and dashboards.
-- **Vulnerability Auditing**: Analyzes code diffs for SQLi, XSS, Command Injection, and SSRF flaws using LLMs.
-- **Remediation Suggestions**: Generates secure code replacements with GitHub suggestion formatting directly in PR comments.
-- **Strict Mode (`--strict`)**: Enforces strict CI gatekeeping by returning exit code `1` when critical/high risks are detected.
-- **Pre-commit Hook Integration**: Prevents insecure commits locally before they reach the repository.
-- **Flexible Runtimes**: Works as a Python package (`pip install .`), GitHub Action, or standalone CLI.
+- 📊 **Executive Security Summary Table**: Formats all audit findings into a high-visibility Markdown matrix table (Severity badge, Type, CVSS, Confidence %, Code snippet).
+- 🔑 **Secret & Token Leak Detection with Masking**: Catches hardcoded API keys, private certificates, and tokens with rapid regex heuristics, automatically masking sensitive values (`AKIA...12`).
+- 🎯 **CVSS 3.1 Impact Scoring & Confidence Matrix**: Assigns standard CVSS severity scores and confidence percentages to all detected security findings.
+- 🖼️ **Dynamic SVG Security Badges (`--badge`)**: Generates embeddable status badges (`security audit: passed / issues found`) for CI workflows and dashboards.
+- 📄 **Multi-Format Export Support**: Exports findings to industry-standard **SARIF** (`--sarif`) and structured **JSON** (`--json`) formats.
+- 💡 **One-Click GitHub Suggestions**: Generates secure code replacements formatted as GitHub suggestions (````suggestion ... ````) directly in PR comments.
+- 🛑 **Strict Mode (`--strict`)**: Enforces strict CI gatekeeping by returning exit code `1` when critical or high risks are detected.
+- 🪝 **Pre-commit Hook Integration**: Prevents insecure commits locally before they reach the repository.
+- ⚡ **Cross-Platform**: Full native support for **Windows (PowerShell/CMD)**, **macOS (zsh/bash)**, and **Linux (Ubuntu/Debian/Arch)**.
 
 ---
 
-## 💻 Local CLI Usage
+## 💻 Cross-Platform Installation & Local CLI Usage
 
-Run a security audit directly on your local uncommitted changes or recent commits:
+### 🪟 1. Windows (PowerShell & CMD)
 
-```bash
-# 1. Install package / dependencies
-pip install .
+#### Prerequisites
+- Python 3.10+ installed (ensure **"Add Python to PATH"** is checked during installation)
+- Git installed
 
-# 2. Set OpenAI API Key (optional for heuristic scan, required for deep AI audit)
-export OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+#### Step 1: Clone Repository & Set Up Virtual Environment
+**PowerShell:**
+```powershell
+# Clone repository
+git clone https://github.com/knmt1219/codex-security-linter.git
+cd codex-security-linter
 
-# 3. Run audit on local git diff
+# Create and activate virtual environment
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# Install package
+pip install -e .
+```
+
+**Command Prompt (CMD):**
+```cmd
+REM Clone repository
+git clone https://github.com/knmt1219/codex-security-linter.git
+cd codex-security-linter
+
+REM Create and activate virtual environment
+python -m venv .venv
+.venv\Scripts\activate.bat
+
+REM Install package
+pip install -e .
+```
+
+#### Step 2: Configure OpenAI API Key
+**PowerShell:**
+```powershell
+$env:OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+```
+
+**Command Prompt (CMD):**
+```cmd
+set OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+#### Step 3: Run Local Security Audit
+```powershell
+# Run heuristic & AI audit on local git diff
 codex-security-linter --local
 
-# 4. Generate SVG status badge
-codex-security-linter --local --badge
-
-# 5. Export scan results to JSON and SARIF
-codex-security-linter --local --json findings.json --sarif results.sarif
-
-# 6. Enforce strict exit code on security flaws
+# Enforce strict exit code (exit 1 on CRITICAL/HIGH risks)
 codex-security-linter --local --strict
+
+# Generate SVG status badge and export reports
+codex-security-linter --local --badge --json findings.json --sarif results.sarif
 ```
+
+---
+
+### 🍎 2. macOS (Terminal / zsh / bash)
+
+#### Prerequisites
+- Python 3.10+ (`brew install python` via Homebrew)
+- Git installed (`xcode-select --install` or `brew install git`)
+
+#### Step 1: Clone Repository & Set Up Virtual Environment
+```bash
+# Clone repository
+git clone https://github.com/knmt1219/codex-security-linter.git
+cd codex-security-linter
+
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install package
+pip install -e .
+```
+
+#### Step 2: Configure OpenAI API Key
+```bash
+# Set for current session
+export OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+
+# (Optional) Persist in ~/.zshrc or ~/.bash_profile
+echo 'export OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+#### Step 3: Run Local Security Audit
+```bash
+# Run heuristic & AI audit on local git diff
+codex-security-linter --local
+
+# Enforce strict exit code
+codex-security-linter --local --strict
+
+# Generate SVG badge, JSON, and SARIF reports
+codex-security-linter --local --badge --json findings.json --sarif results.sarif
+```
+
+---
+
+### 🐧 3. Linux (Ubuntu / Debian / Arch / Fedora)
+
+#### Prerequisites
+```bash
+# Ubuntu / Debian
+sudo apt update && sudo apt install -y python3 python3-pip python3-venv git
+
+# Arch Linux
+sudo pacman -S python python-pip git
+
+# Fedora / RHEL
+sudo dnf install -y python3 python3-pip git
+```
+
+#### Step 1: Clone Repository & Set Up Virtual Environment
+```bash
+# Clone repository
+git clone https://github.com/knmt1219/codex-security-linter.git
+cd codex-security-linter
+
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install package
+pip install -e .
+```
+
+#### Step 2: Configure OpenAI API Key
+```bash
+# Set for current session
+export OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+
+# (Optional) Persist in ~/.bashrc
+echo 'export OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### Step 3: Run Local Security Audit
+```bash
+# Run heuristic & AI audit on local git diff
+codex-security-linter --local
+
+# Enforce strict mode in CI/CD pipelines
+codex-security-linter --local --strict
+
+# Export multi-format reports
+codex-security-linter --local --badge --json findings.json --sarif results.sarif
+```
+
+---
+
+## 🎛️ CLI Options & Flags Reference
+
+| Option / Flag | Type | Description |
+| :--- | :---: | :--- |
+| `--local` | Flag | Run security audit on local `git diff` instead of GitHub Action environment. |
+| `--strict` | Flag | Exit with code `1` if any `CRITICAL` or `HIGH` severity vulnerabilities are detected. |
+| `--badge` | Flag | Automatically generate a vector SVG status badge (`security-badge.svg`). |
+| `--json <path>` | String | Export structured scan results to a JSON file (e.g., `--json findings.json`). |
+| `--sarif <path>` | String | Export scan results to OASIS SARIF 2.1.0 format (e.g., `--sarif results.sarif`). |
 
 ---
 
 ## 🪝 Pre-commit Hook Integration
 
+Prevent insecure code and hardcoded secrets from ever being committed:
+
+### Method 1: Auto-generate `.pre-commit-config.yaml`
+```bash
+codex-security-linter --install-hook
+```
+
+### Method 2: Manual Configuration
 Add Codex Security Linter to your `.pre-commit-config.yaml`:
 
 ```yaml
@@ -75,24 +227,47 @@ repos:
       - id: codex-security-linter
 ```
 
+Then install the pre-commit hook:
+```bash
+pip install pre-commit
+pre-commit install
+```
+
 ---
 
 ## 🚀 GitHub Action Quick Setup
 
-Add `.github/workflows/security.yml` to your repository:
+Automate security audits on every Pull Request.
+
+### 1. Add Repository Secret
+In your GitHub repository, navigate to **Settings > Secrets and variables > Actions** and add:
+- `OPENAI_API_KEY`: Your OpenAI API key (`sk-...`).
+
+### 2. Create Workflow File
+Create `.github/workflows/security.yml` in your repository:
 
 ```yaml
 name: Security Audit
+
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
-  audit:
+  security-audit:
+    name: Codex AI Security Linter
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: knmt1219/codex-security-linter@v1.8.0
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Codex Security Linter
+        uses: knmt1219/codex-security-linter@v1.8.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -103,7 +278,7 @@ jobs:
 
 ## ⚙️ Configuration (`.codex-security.yml`)
 
-You can customize the linter behavior using `.codex-security.yml`:
+Customize scanning behavior by creating a `.codex-security.yml` file in your repository root:
 
 ```yaml
 version: 1.0
@@ -122,6 +297,14 @@ rules:
 
 ---
 
+## 🔒 Security & Privacy
+
+- **Diff-Only Transmission**: Only modified code diffs (`git diff`) are audited; entire source trees are never uploaded.
+- **Automatic Secret Masking**: Detected credentials and tokens are masked before being included in reports to prevent secondary exposure.
+- **Enterprise Safe**: Compatible with OpenAI Enterprise data privacy policies.
+
+---
+
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is open-source and licensed under the [MIT License](LICENSE) (Copyright © 2026 Hồ Minh Tuấn).
