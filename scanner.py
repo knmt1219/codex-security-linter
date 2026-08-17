@@ -40,7 +40,7 @@ def post_comment(repo_full_name: str, pr_number: int, github_token: str, body: s
     res = requests.post(url, headers=headers, json={"body": body}, timeout=30)
     return res.status_code == 201
 
-def heuristic_scan(diff_text: str) -> list:
+def heuristic_scan_structured(diff_text: str) -> list:
     findings = []
     for line in diff_text.splitlines():
         if line.startswith('+') and not line.startswith('+++'):
@@ -48,11 +48,34 @@ def heuristic_scan(diff_text: str) -> list:
             masked_line = mask_sensitive_value(clean_line)
             for pattern, desc, score in COMMON_SECRET_PATTERNS:
                 if re.search(pattern, line):
-                    findings.append(f"- **[CRITICAL SECRET LEAK]** `{desc}` (CVSS: {score} | Confidence: 99%): `{masked_line[:80]}`")
+                    findings.append({
+                        "severity": "CRITICAL",
+                        "type": desc,
+                        "score": score,
+                        "confidence": "99%",
+                        "snippet": masked_line[:80]
+                    })
             for pattern, desc, score in LANGUAGE_VULN_PATTERNS:
                 if re.search(pattern, line):
-                    findings.append(f"- **[HIGH SECURITY RISK]** `{desc}` (CVSS: {score} | Confidence: 95%): `{masked_line[:80]}`")
+                    findings.append({
+                        "severity": "HIGH",
+                        "type": desc,
+                        "score": score,
+                        "confidence": "95%",
+                        "snippet": masked_line[:80]
+                    })
     return findings
+
+def build_markdown_summary_table(findings: list) -> str:
+    if not findings:
+        return "✅ **Security Status:** No vulnerabilities or secret leaks detected."
+    
+    table = "| Severity | Vulnerability Type | CVSS | Confidence | Code Snippet |\n"
+    table += "| :--- | :--- | :---: | :---: | :--- |\n"
+    for f in findings:
+        badge = "🔴 `CRITICAL`" if f["severity"] == "CRITICAL" else "🟠 `HIGH`"
+        table += f"| {badge} | {f['type']} | **{f['score']}** | {f['confidence']} | `{f['snippet']}` |\n"
+    return table
 
 def generate_svg_badge(has_issues: bool, output_path: str = "security-badge.svg"):
     color = "#e05d44" if has_issues else "#4c1"
@@ -74,7 +97,6 @@ def generate_svg_badge(has_issues: bool, output_path: str = "security-badge.svg"
 </svg>"""
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(svg_content)
-    print(f"SVG security badge generated at: {output_path}")
 
 def export_sarif(findings: list, output_path: str = "results.sarif"):
     sarif_data = {
@@ -84,7 +106,7 @@ def export_sarif(findings: list, output_path: str = "results.sarif"):
             "tool": {
                 "driver": {
                     "name": "Codex Security Linter",
-                    "version": "1.6.0",
+                    "version": "1.7.0",
                     "informationUri": "https://github.com/knmt1219/codex-security-linter",
                     "rules": [{
                         "id": "CSL001",
@@ -96,8 +118,8 @@ def export_sarif(findings: list, output_path: str = "results.sarif"):
             "results": [
                 {
                     "ruleId": "CSL001",
-                    "level": "error" if "CRITICAL" in f or "HIGH" in f else "warning",
-                    "message": {"text": f}
+                    "level": "error" if f["severity"] in ["CRITICAL", "HIGH"] else "warning",
+                    "message": {"text": f"{f['type']} (CVSS: {f['score']}) in `{f['snippet']}`"}
                 } for f in findings
             ]
         }]
@@ -135,6 +157,7 @@ def main():
     parser = argparse.ArgumentParser(description="Codex Security Linter CLI & GitHub Action")
     parser.add_argument("--local", action="store_true", help="Run scan on local git diff")
     parser.add_argument("--sarif", type=str, help="Export scan results to SARIF format")
+    parser.add_argument("--json", type=str, help="Export scan results to JSON format")
     parser.add_argument("--badge", action="store_true", help="Generate SVG status badge")
     parser.add_argument("--strict", action="store_true", help="Fail with exit code 1 if critical/high risks found")
     args = parser.parse_args()
@@ -150,17 +173,20 @@ def main():
             print("No local git changes detected to audit.")
             return
 
-        print("🔍 Running Heuristic & Language-Aware Security Scan (v1.6.0)...")
-        findings = heuristic_scan(diff_text)
+        print("🔍 Running Heuristic & Language-Aware Security Scan (v1.7.0)...")
+        findings = heuristic_scan_structured(diff_text)
         if args.badge:
             generate_svg_badge(bool(findings))
 
         if findings:
-            print("\n⚠️ Scan Findings:")
-            for f in findings:
-                print(f"  {f}")
+            print("\n📊 Security Summary Matrix:")
+            print(build_markdown_summary_table(findings))
             if args.sarif:
                 export_sarif(findings, args.sarif)
+            if args.json:
+                with open(args.json, "w", encoding="utf-8") as jf:
+                    json.dump(findings, jf, indent=2)
+                print(f"JSON report exported to: {args.json}")
             if args.strict:
                 print("\n❌ Strict mode: Vulnerabilities detected. Exiting with error.")
                 sys.exit(1)
@@ -200,25 +226,28 @@ def main():
         print("Empty or inaccessible diff.")
         return
 
-    findings = heuristic_scan(diff_text)
+    findings = heuristic_scan_structured(diff_text)
     if args.badge:
         generate_svg_badge(bool(findings))
 
-    report_sections = []
-    if findings:
-        report_sections.append("#### 🚨 Immediate Risks Detected (Heuristic Engine v1.6.0)\n" + "\n".join(findings))
-        if args.sarif:
-            export_sarif(findings, args.sarif)
+    summary_table = build_markdown_summary_table(findings)
+    report_sections = [f"#### 📊 Executive Security Summary\n{summary_table}"]
+
+    if args.sarif:
+        export_sarif(findings, args.sarif)
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as jf:
+            json.dump(findings, jf, indent=2)
 
     if api_key:
         try:
             ai_report = audit_diff_with_ai(diff_text, api_key, model_name)
-            report_sections.append("#### 🤖 Deep AI Security Analysis\n" + ai_report)
+            report_sections.append("#### 🤖 Deep AI Security Analysis & Fixes\n" + ai_report)
         except Exception as e:
             report_sections.append(f"*(AI analysis unavailable: {e})*")
 
     final_comment = (
-        "### 🛡️ Codex Security Audit Report (v1.6.0)\n\n"
+        "### 🛡️ Codex Security Audit Report (v1.7.0)\n\n"
         + "\n\n".join(report_sections)
         + "\n\n---\n*Automated audit powered by [codex-security-linter](https://github.com/knmt1219/codex-security-linter)*"
     )
