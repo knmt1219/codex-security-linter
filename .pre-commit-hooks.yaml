@@ -1,0 +1,7 @@
+- id: codex-security-linter
+  name: Codex Security Linter
+  description: Automatically audit git commits for secrets and security vulnerabilities
+  entry: python -m scanner --local
+  language: python
+  stages: [pre-commit]
+  always_run: true

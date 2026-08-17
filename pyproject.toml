@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-security-linter"
+version = "1.3.0"
+description = "Automated AI-powered security linter & vulnerability auditor for Git repositories and Pull Requests."
+readme = "README.md"
+authors = [{ name = "Hồ Minh Tuấn", email = "minhtuanho120912@gmail.com" }]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.0.0",
+    "requests>=2.31.0"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Security",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+]
+
+[project.scripts]
+codex-security-linter = "scanner:main"

@@ -41,7 +41,7 @@ def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-m
         "You are an application security expert auditing an open-source Pull Request.\n"
         "Analyze the following code diff and report:\n"
         "1. [SEVERITY: CRITICAL/HIGH/MEDIUM/LOW] Summary of found risks (Secret leaks, SQLi, XSS, RCE, SSRF).\n"
-        "2. Concrete remediation code patches (Before vs After).\n"
+        "2. Concrete remediation code patches (Before vs After) with GitHub suggestion formatting when applicable.\n"
         "3. Best practices recommendation.\n"
         "If no vulnerabilities are detected, state: 'No security vulnerabilities detected.'\n\n"
         f"Diff:\n```diff\n{diff_text[:12000]}\n```"
@@ -56,9 +56,40 @@ def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-m
     )
     return res.choices[0].message.content
 
+def export_sarif(findings: list, output_path: str = "results.sarif"):
+    sarif_data = {
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "Codex Security Linter",
+                    "version": "1.3.0",
+                    "informationUri": "https://github.com/knmt1219/codex-security-linter",
+                    "rules": [{
+                        "id": "CSL001",
+                        "name": "HardcodedSecretOrVulnerability",
+                        "shortDescription": {"text": "Security flaw or secret detected in code changes"}
+                    }]
+                }
+            },
+            "results": [
+                {
+                    "ruleId": "CSL001",
+                    "level": "error",
+                    "message": {"text": f}
+                } for f in findings
+            ]
+        }]
+    }
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(sarif_data, f, indent=2)
+    print(f"✅ SARIF report successfully exported to {output_path}")
+
 def main():
     parser = argparse.ArgumentParser(description="Codex Security Linter CLI & GitHub Action")
     parser.add_argument("--local", action="store_true", help="Run scan on local git diff")
+    parser.add_argument("--sarif", nargs="?", const="results.sarif", default=None, help="Export scan results to SARIF format")
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -77,12 +108,19 @@ def main():
         if regex_findings:
             print("\n⚠️ Heuristic Scanner Findings:\n" + "\n".join(regex_findings))
 
+        ai_report = None
         if api_key:
             print("\n🤖 Running Deep AI Security Audit...")
             ai_report = audit_diff_with_ai(diff_text, api_key, model_name)
             print("\n" + ai_report)
         else:
             print("\nℹ️ Tip: Set OPENAI_API_KEY for advanced AI vulnerability analysis.")
+
+        if args.sarif:
+            all_findings = list(regex_findings)
+            if ai_report:
+                all_findings.append(ai_report)
+            export_sarif(all_findings, args.sarif)
         return
 
     # Chế độ GitHub Action
@@ -120,6 +158,7 @@ def main():
         report_sections.append("#### 🚨 Immediate Secret Leaks Detected (Regex Engine)\n" + "\n".join(regex_findings))
 
     # 2. Chạy quét AI nếu có key
+    ai_report = None
     if api_key:
         try:
             ai_report = audit_diff_with_ai(diff_text, api_key, model_name)
@@ -137,6 +176,12 @@ def main():
 
     post_comment(repo_full_name, pr_number, token, final_comment)
     print("Security audit executed and posted successfully.")
+
+    if args.sarif:
+        all_findings = list(regex_findings)
+        if ai_report:
+            all_findings.append(ai_report)
+        export_sarif(all_findings, args.sarif)
 
 if __name__ == "__main__":
     main()
