@@ -4,14 +4,20 @@ import re
 import json
 import argparse
 import requests
-from openai import OpenAI
 
 COMMON_SECRET_PATTERNS = [
     (r'(?i)(?:aws_access_key_id|aws_secret_access_key|aws_session_token)\s*=\s*["\']?([A-Za-z0-9/+=]{20,})', "AWS Credential Leak"),
     (r'(?i)(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}', "GitHub Personal Access Token"),
-    (r'-----BEGIN\s+PRIVATE\s+KEY-----', "Exposed Private Key"),
+    (r'-----BEGIN\s+([A-Z\s]+)?PRIVATE\s+KEY-----', "Exposed Private Key"),
     (r'(?i)(?:api[_-]?key|secret[_-]?key|auth[_-]?token)\s*=\s*["\']([a-zA-Z0-9_\-]{16,})["\']', "Potential Hardcoded API Key/Token"),
     (r'(?i)password\s*=\s*["\']([^"\']{4,})["\']', "Hardcoded Plaintext Password"),
+]
+
+LANGUAGE_VULN_PATTERNS = [
+    (r'(?i)(?:eval|exec)\s*\(', "Dangerous Dynamic Code Execution (eval/exec)"),
+    (r'(?i)subprocess\.(?:Popen|call|run)\s*\(.*shell\s*=\s*True', "Command Injection Risk (shell=True)"),
+    (r'(?i)dangerouslySetInnerHTML', "Cross-Site Scripting (XSS) via dangerouslySetInnerHTML"),
+    (r'(?i)pickle\.loads\s*\(', "Insecure Deserialization (pickle.loads)"),
 ]
 
 def get_pr_diff(repo_full_name: str, pr_number: int, github_token: str) -> str:
@@ -26,22 +32,61 @@ def post_comment(repo_full_name: str, pr_number: int, github_token: str, body: s
     res = requests.post(url, headers=headers, json={"body": body}, timeout=30)
     return res.status_code == 201
 
-def heuristic_regex_scan(diff_text: str) -> list:
+def heuristic_scan(diff_text: str) -> list:
     findings = []
     for line in diff_text.splitlines():
         if line.startswith('+') and not line.startswith('+++'):
+            clean_line = line[1:].strip()
             for pattern, desc in COMMON_SECRET_PATTERNS:
                 if re.search(pattern, line):
-                    findings.append(f"- **[CRITICAL SECRET LEAK]** `{desc}` found in added line:\n  > `{line[1:].strip()[:80]}`")
+                    findings.append(f"- **[CRITICAL SECRET LEAK]** `{desc}`: `{clean_line[:80]}`")
+            for pattern, desc in LANGUAGE_VULN_PATTERNS:
+                if re.search(pattern, line):
+                    findings.append(f"- **[HIGH SECURITY RISK]** `{desc}`: `{clean_line[:80]}`")
     return findings
 
+def export_sarif(findings: list, output_path: str = "results.sarif"):
+    sarif_data = {
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "Codex Security Linter",
+                    "version": "1.4.0",
+                    "informationUri": "https://github.com/knmt1219/codex-security-linter",
+                    "rules": [{
+                        "id": "CSL001",
+                        "name": "SecurityVulnerabilityOrSecret",
+                        "shortDescription": {"text": "Security flaw, dangerous function, or secret detected in diff"}
+                    }]
+                }
+            },
+            "results": [
+                {
+                    "ruleId": "CSL001",
+                    "level": "error" if "CRITICAL" in f or "HIGH" in f else "warning",
+                    "message": {"text": f}
+                } for f in findings
+            ]
+        }]
+    }
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(sarif_data, f, indent=2)
+    print(f"SARIF report exported to: {output_path}")
+
 def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-mini") -> str:
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return "*(OpenAI SDK not installed. Please run `pip install openai` to enable AI vulnerability analysis)*"
+
     client = OpenAI(api_key=api_key)
     prompt = (
         "You are an application security expert auditing an open-source Pull Request.\n"
         "Analyze the following code diff and report:\n"
-        "1. [SEVERITY: CRITICAL/HIGH/MEDIUM/LOW] Summary of found risks (Secret leaks, SQLi, XSS, RCE, SSRF).\n"
-        "2. Concrete remediation code patches (Before vs After) with GitHub suggestion formatting when applicable.\n"
+        "1. [SEVERITY: CRITICAL/HIGH/MEDIUM/LOW] Summary of found risks (Secret leaks, SQLi, XSS, RCE, Insecure Deserialization).\n"
+        "2. Concrete remediation code patches formatted as GitHub suggestions (```suggestion ... ```) when applicable.\n"
         "3. Best practices recommendation.\n"
         "If no vulnerabilities are detected, state: 'No security vulnerabilities detected.'\n\n"
         f"Diff:\n```diff\n{diff_text[:12000]}\n```"
@@ -56,40 +101,10 @@ def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-m
     )
     return res.choices[0].message.content
 
-def export_sarif(findings: list, output_path: str = "results.sarif"):
-    sarif_data = {
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "Codex Security Linter",
-                    "version": "1.3.0",
-                    "informationUri": "https://github.com/knmt1219/codex-security-linter",
-                    "rules": [{
-                        "id": "CSL001",
-                        "name": "HardcodedSecretOrVulnerability",
-                        "shortDescription": {"text": "Security flaw or secret detected in code changes"}
-                    }]
-                }
-            },
-            "results": [
-                {
-                    "ruleId": "CSL001",
-                    "level": "error",
-                    "message": {"text": f}
-                } for f in findings
-            ]
-        }]
-    }
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(sarif_data, f, indent=2)
-    print(f"✅ SARIF report successfully exported to {output_path}")
-
 def main():
     parser = argparse.ArgumentParser(description="Codex Security Linter CLI & GitHub Action")
     parser.add_argument("--local", action="store_true", help="Run scan on local git diff")
-    parser.add_argument("--sarif", nargs="?", const="results.sarif", default=None, help="Export scan results to SARIF format")
+    parser.add_argument("--sarif", type=str, help="Export scan results to SARIF format")
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -103,24 +118,23 @@ def main():
             print("No local git changes detected to audit.")
             return
 
-        print("🔍 Scanning local diff for secrets (Heuristic)...")
-        regex_findings = heuristic_regex_scan(diff_text)
-        if regex_findings:
-            print("\n⚠️ Heuristic Scanner Findings:\n" + "\n".join(regex_findings))
+        print("🔍 Running Heuristic & Language-Aware Security Scan...")
+        findings = heuristic_scan(diff_text)
+        if findings:
+            print("\n⚠️ Scan Findings:")
+            for f in findings:
+                print(f"  {f}")
+            if args.sarif:
+                export_sarif(findings, args.sarif)
+        else:
+            print("✅ Heuristic Scan: Clean (No obvious secrets or dangerous patterns detected)")
 
-        ai_report = None
         if api_key:
-            print("\n🤖 Running Deep AI Security Audit...")
+            print("\n🤖 Running Deep AI Security Analysis...")
             ai_report = audit_diff_with_ai(diff_text, api_key, model_name)
             print("\n" + ai_report)
         else:
             print("\nℹ️ Tip: Set OPENAI_API_KEY for advanced AI vulnerability analysis.")
-
-        if args.sarif:
-            all_findings = list(regex_findings)
-            if ai_report:
-                all_findings.append(ai_report)
-            export_sarif(all_findings, args.sarif)
         return
 
     # Chế độ GitHub Action
@@ -150,15 +164,14 @@ def main():
         print("Empty or inaccessible diff.")
         return
 
-    # 1. Chạy quét regex nhanh
-    regex_findings = heuristic_regex_scan(diff_text)
+    findings = heuristic_scan(diff_text)
     report_sections = []
 
-    if regex_findings:
-        report_sections.append("#### 🚨 Immediate Secret Leaks Detected (Regex Engine)\n" + "\n".join(regex_findings))
+    if findings:
+        report_sections.append("#### 🚨 Immediate Risks Detected (Heuristic Engine)\n" + "\n".join(findings))
+        if args.sarif:
+            export_sarif(findings, args.sarif)
 
-    # 2. Chạy quét AI nếu có key
-    ai_report = None
     if api_key:
         try:
             ai_report = audit_diff_with_ai(diff_text, api_key, model_name)
@@ -166,7 +179,7 @@ def main():
         except Exception as e:
             report_sections.append(f"*(AI analysis unavailable: {e})*")
     else:
-        report_sections.append("ℹ️ *Note: Add `OPENAI_API_KEY` to repository secrets to enable deep AI vulnerability analysis.*")
+        report_sections.append("ℹ️ *Note: Add `OPENAI_API_KEY` to repository secrets to enable deep AI vulnerability analysis and One-Click code suggestions.*")
 
     final_comment = (
         "### 🛡️ Codex Security Audit Report\n\n"
@@ -176,12 +189,6 @@ def main():
 
     post_comment(repo_full_name, pr_number, token, final_comment)
     print("Security audit executed and posted successfully.")
-
-    if args.sarif:
-        all_findings = list(regex_findings)
-        if ai_report:
-            all_findings.append(ai_report)
-        export_sarif(all_findings, args.sarif)
 
 if __name__ == "__main__":
     main()
