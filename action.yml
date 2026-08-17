@@ -1,5 +1,8 @@
 name: 'Codex Security Linter'
 description: 'Automated AI-powered security linter & vulnerability auditor for Pull Requests.'
+branding:
+  icon: 'shield'
+  color: 'purple'
 inputs:
   github-token:
     description: 'GitHub Token for authentication'

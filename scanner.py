@@ -106,7 +106,7 @@ def export_sarif(findings: list, output_path: str = "results.sarif"):
             "tool": {
                 "driver": {
                     "name": "Codex Security Linter",
-                    "version": "1.7.0",
+                    "version": "1.8.0",
                     "informationUri": "https://github.com/knmt1219/codex-security-linter",
                     "rules": [{
                         "id": "CSL001",
@@ -173,7 +173,7 @@ def main():
             print("No local git changes detected to audit.")
             return
 
-        print("🔍 Running Heuristic & Language-Aware Security Scan (v1.7.0)...")
+        print("🔍 Running Heuristic & Language-Aware Security Scan (v1.8.0)...")
         findings = heuristic_scan_structured(diff_text)
         if args.badge:
             generate_svg_badge(bool(findings))
@@ -247,7 +247,7 @@ def main():
             report_sections.append(f"*(AI analysis unavailable: {e})*")
 
     final_comment = (
-        "### 🛡️ Codex Security Audit Report (v1.7.0)\n\n"
+        "### 🛡️ Codex Security Audit Report (v1.8.0)\n\n"
         + "\n\n".join(report_sections)
         + "\n\n---\n*Automated audit powered by [codex-security-linter](https://github.com/knmt1219/codex-security-linter)*"
     )
