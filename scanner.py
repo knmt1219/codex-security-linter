@@ -1,9 +1,18 @@
 import os
 import sys
+import re
 import json
 import argparse
 import requests
 from openai import OpenAI
+
+COMMON_SECRET_PATTERNS = [
+    (r'(?i)(?:aws_access_key_id|aws_secret_access_key|aws_session_token)\s*=\s*["\']?([A-Za-z0-9/+=]{20,})', "AWS Credential Leak"),
+    (r'(?i)(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}', "GitHub Personal Access Token"),
+    (r'-----BEGIN\s+PRIVATE\s+KEY-----', "Exposed Private Key"),
+    (r'(?i)(?:api[_-]?key|secret[_-]?key|auth[_-]?token)\s*=\s*["\']([a-zA-Z0-9_\-]{16,})["\']', "Potential Hardcoded API Key/Token"),
+    (r'(?i)password\s*=\s*["\']([^"\']{4,})["\']', "Hardcoded Plaintext Password"),
+]
 
 def get_pr_diff(repo_full_name: str, pr_number: int, github_token: str) -> str:
     url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}"
@@ -16,6 +25,15 @@ def post_comment(repo_full_name: str, pr_number: int, github_token: str, body: s
     headers = {"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github.v3+json"}
     res = requests.post(url, headers=headers, json={"body": body}, timeout=30)
     return res.status_code == 201
+
+def heuristic_regex_scan(diff_text: str) -> list:
+    findings = []
+    for line in diff_text.splitlines():
+        if line.startswith('+') and not line.startswith('+++'):
+            for pattern, desc in COMMON_SECRET_PATTERNS:
+                if re.search(pattern, line):
+                    findings.append(f"- **[CRITICAL SECRET LEAK]** `{desc}` found in added line:\n  > `{line[1:].strip()[:80]}`")
+    return findings
 
 def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-mini") -> str:
     client = OpenAI(api_key=api_key)
@@ -43,35 +61,43 @@ def main():
     parser.add_argument("--local", action="store_true", help="Run scan on local git diff")
     args = parser.parse_args()
 
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     model_name = os.environ.get("MODEL_NAME", "gpt-4o-mini")
 
-    if not api_key:
-        print("Error: OPENAI_API_KEY environment variable is required.", file=sys.stderr)
-        sys.exit(1)
-
     if args.local:
-        # Chế độ quét cục bộ trên máy
         diff_text = os.popen("git diff HEAD~1").read()
         if not diff_text.strip():
             diff_text = os.popen("git diff").read()
         if not diff_text.strip():
             print("No local git changes detected to audit.")
             return
-        print("🔍 Auditing local git diff...")
-        report = audit_diff_with_ai(diff_text, api_key, model_name)
-        print("\n" + report)
+
+        print("🔍 Scanning local diff for secrets (Heuristic)...")
+        regex_findings = heuristic_regex_scan(diff_text)
+        if regex_findings:
+            print("\n⚠️ Heuristic Scanner Findings:\n" + "\n".join(regex_findings))
+
+        if api_key:
+            print("\n🤖 Running Deep AI Security Audit...")
+            ai_report = audit_diff_with_ai(diff_text, api_key, model_name)
+            print("\n" + ai_report)
+        else:
+            print("\nℹ️ Tip: Set OPENAI_API_KEY for advanced AI vulnerability analysis.")
         return
 
-    # Chế độ chạy trên GitHub Action
+    # Chế độ GitHub Action
     token = os.environ.get("GITHUB_TOKEN")
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     if not (token and event_path):
-        print("Error: GITHUB_TOKEN and GITHUB_EVENT_PATH are required in Action mode.", file=sys.stderr)
+        print("Warning: GITHUB_TOKEN or GITHUB_EVENT_PATH not set. Exiting cleanly.")
         return
 
-    with open(event_path, "r", encoding="utf-8") as f:
-        event_data = json.load(f)
+    try:
+        with open(event_path, "r", encoding="utf-8") as f:
+            event_data = json.load(f)
+    except Exception as e:
+        print(f"Error loading event payload: {e}")
+        return
 
     pr_data = event_data.get("pull_request")
     if not pr_data:
@@ -81,18 +107,36 @@ def main():
     repo_full_name = event_data["repository"]["full_name"]
     pr_number = pr_data["number"]
     diff_text = get_pr_diff(repo_full_name, pr_number, token)
+
     if not diff_text.strip():
         print("Empty or inaccessible diff.")
         return
 
-    report = audit_diff_with_ai(diff_text, api_key, model_name)
-    comment_body = (
+    # 1. Chạy quét regex nhanh
+    regex_findings = heuristic_regex_scan(diff_text)
+    report_sections = []
+
+    if regex_findings:
+        report_sections.append("#### 🚨 Immediate Secret Leaks Detected (Regex Engine)\n" + "\n".join(regex_findings))
+
+    # 2. Chạy quét AI nếu có key
+    if api_key:
+        try:
+            ai_report = audit_diff_with_ai(diff_text, api_key, model_name)
+            report_sections.append("#### 🤖 Deep AI Security Analysis\n" + ai_report)
+        except Exception as e:
+            report_sections.append(f"*(AI analysis unavailable: {e})*")
+    else:
+        report_sections.append("ℹ️ *Note: Add `OPENAI_API_KEY` to repository secrets to enable deep AI vulnerability analysis.*")
+
+    final_comment = (
         "### 🛡️ Codex Security Audit Report\n\n"
-        f"{report}\n\n"
-        "---\n*Automated audit powered by [codex-security-linter](https://github.com/knmt1219/codex-security-linter)*"
+        + "\n\n".join(report_sections)
+        + "\n\n---\n*Automated audit powered by [codex-security-linter](https://github.com/knmt1219/codex-security-linter)*"
     )
-    post_comment(repo_full_name, pr_number, token, comment_body)
-    print("Security audit posted successfully.")
+
+    post_comment(repo_full_name, pr_number, token, final_comment)
+    print("Security audit executed and posted successfully.")
 
 if __name__ == "__main__":
     main()
