@@ -4,10 +4,10 @@ import re
 import json
 import argparse
 import html
-from typing import Any
+from typing import Any, Dict, List, Optional
 import requests
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 COMMON_SECRET_PATTERNS = [
     (r'(?i)(?:aws_access_key_id|aws_secret_access_key|aws_session_token)\s*=\s*["\']?([A-Za-z0-9/+=]{20,})', "AWS Credential Leak", "10.0"),
@@ -39,6 +39,72 @@ def mask_sensitive_value(line: str) -> str:
             return val[:4] + "..." + val[-4:]
         return val
     return re.sub(r'[A-Za-z0-9_\-]{12,}', mask_match, line)
+
+def parse_simple_yaml(text: str) -> Dict[str, Any]:
+    """Lightweight fallback YAML parser for configuration files without external dependencies."""
+    config: Dict[str, Any] = {}
+    current_section: Optional[str] = None
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        # Check section header
+        if not raw_line.startswith(" ") and line.endswith(":"):
+            current_section = line[:-1].strip()
+            config[current_section] = {}
+            continue
+
+        # Sub-keys inside a section
+        if current_section and raw_line.startswith("  ") and ":" in line:
+            parts = line.split(":", 1)
+            k = parts[0].strip()
+            v = parts[1].strip().strip('"').strip("'")
+            if isinstance(config[current_section], dict):
+                config[current_section][k] = v
+            continue
+
+        # Lists
+        if current_section and line.startswith("- "):
+            item = line[2:].strip().strip('"').strip("'")
+            if not isinstance(config[current_section], list):
+                config[current_section] = []
+            config[current_section].append(item)
+            continue
+
+        # Top-level key: value
+        if ":" in line:
+            parts = line.split(":", 1)
+            k = parts[0].strip()
+            v = parts[1].strip().strip('"').strip("'")
+            config[k] = v
+            current_section = None
+
+    return config
+
+def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """Load configuration from specified path or default .codex-security.yml."""
+    target_path = config_path or ".codex-security.yml"
+    if not os.path.exists(target_path):
+        return {}
+
+    try:
+        with open(target_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        try:
+            import yaml  # type: ignore
+            data = yaml.safe_load(content)
+            if isinstance(data, dict):
+                return data
+        except ImportError:
+            pass
+
+        return parse_simple_yaml(content)
+    except Exception as e:
+        print(f"Warning: Failed to load config from '{target_path}': {e}", file=sys.stderr)
+        return {}
 
 def set_github_output(name: str, value: Any):
     """Write an output parameter to $GITHUB_OUTPUT file in GitHub Actions."""
@@ -344,6 +410,7 @@ def main():
     parser.add_argument("--badge", action="store_true", help="Generate SVG status badge")
     parser.add_argument("--strict", action="store_true", help="Fail with exit code 1 if critical/high risks found")
     parser.add_argument("--quiet", action="store_true", help="Quiet mode: only output messages when security issues are found")
+    parser.add_argument("--config", type=str, help="Path to custom configuration file (default: .codex-security.yml)")
     parser.add_argument(
         "--fail-on",
         type=str,
@@ -352,14 +419,20 @@ def main():
     )
     args = parser.parse_args()
 
+    # Load configuration file
+    config = load_config(args.config)
+    settings = config.get("settings", {}) if isinstance(config.get("settings"), dict) else {}
+
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    model_name = os.environ.get("MODEL_NAME", "gpt-4o-mini")
+    model_name = os.environ.get("MODEL_NAME") or settings.get("model") or "gpt-4o-mini"
 
     fail_threshold = None
     if args.fail_on:
         fail_threshold = args.fail_on.upper()
     elif args.strict:
         fail_threshold = "HIGH"
+    elif settings.get("severity_threshold"):
+        fail_threshold = str(settings.get("severity_threshold")).upper()
 
     if args.local:
         diff_text = os.popen("git diff HEAD~1").read()

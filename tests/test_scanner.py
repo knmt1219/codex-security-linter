@@ -18,6 +18,8 @@ from scanner import (
     export_html,
     should_fail_on_severity,
     write_github_action_outputs,
+    load_config,
+    parse_simple_yaml,
 )
 
 def test_mask_sensitive_value():
@@ -121,6 +123,21 @@ def test_github_action_outputs(tmp_path):
     assert "html-report-path=security-report.html" in content
     del os.environ["GITHUB_OUTPUT"]
 
+def test_load_config(tmp_path):
+    config_file = tmp_path / "custom.yml"
+    yaml_content = """version: 2.2
+settings:
+  model: "gpt-4o"
+  severity_threshold: "HIGH"
+ignore_paths:
+  - "tests/*"
+"""
+    config_file.write_text(yaml_content, encoding="utf-8")
+    config = load_config(str(config_file))
+    assert config.get("settings", {}).get("model") == "gpt-4o"
+    assert config.get("settings", {}).get("severity_threshold") == "HIGH"
+    assert "tests/*" in config.get("ignore_paths", [])
+
 if __name__ == "__main__":
     import tempfile
 
@@ -129,7 +146,7 @@ if __name__ == "__main__":
     if sys.stderr and hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
 
-    print("Running unit tests for v2.1.0...")
+    print("Running unit tests for v2.2.0...")
     test_mask_sensitive_value()
     print("✓ test_mask_sensitive_value passed")
     test_heuristic_scan_structured()
@@ -147,7 +164,9 @@ if __name__ == "__main__":
         print("✓ test_export_html passed")
         test_github_action_outputs(tp)
         print("✓ test_github_action_outputs passed")
+        test_load_config(tp)
+        print("✓ test_load_config passed")
 
     test_should_fail_on_severity()
     print("✓ test_should_fail_on_severity passed")
-    print("🎉 All 8 unit tests passed successfully!")
+    print("🎉 All 9 unit tests passed successfully!")
