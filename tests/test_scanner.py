@@ -89,6 +89,21 @@ def test_php_vulnerability_patterns():
     assert "PHP Command Execution Vulnerability (system/shell_exec)" in types
     assert "PHP Insecure Object Deserialization (unserialize)" in types
 
+def test_c_cpp_vulnerability_patterns():
+    cpp_diff = """--- a/main.cpp
++++ b/main.cpp
++ gets(buffer);
++ strcpy(dest, src);
++ strcat(dest, extra);
++ sprintf(out, "User: %s", name);
+"""
+    findings = heuristic_scan_structured(cpp_diff)
+    assert len(findings) == 4
+    types = [f["type"] for f in findings]
+    assert "C/C++ Highly Dangerous Function (gets - Buffer Overflow)" in types
+    assert "C/C++ Insecure Unbounded String Copy (strcpy/strcat Buffer Overflow)" in types
+    assert "C/C++ Format String / Buffer Overflow Risk (sprintf)" in types
+
 def test_chunk_diff_smart():
     small_diff = "+ const x = 10;"
     assert chunk_diff_smart(small_diff, max_chars=100) == small_diff
@@ -225,7 +240,7 @@ def test_github_action_outputs(tmp_path):
 
 def test_load_config(tmp_path):
     config_file = tmp_path / "custom.yml"
-    yaml_content = """version: 2.6
+    yaml_content = """version: 2.7
 settings:
   model: "gpt-4o"
   severity_threshold: "HIGH"
@@ -246,7 +261,7 @@ if __name__ == "__main__":
     if sys.stderr and hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
 
-    print("Running unit tests for v2.6.0...")
+    print("Running unit tests for v2.7.0...")
     test_mask_sensitive_value()
     print("✓ test_mask_sensitive_value passed")
     test_heuristic_scan_structured()
@@ -259,6 +274,8 @@ if __name__ == "__main__":
     print("✓ test_java_vulnerability_patterns passed")
     test_php_vulnerability_patterns()
     print("✓ test_php_vulnerability_patterns passed")
+    test_c_cpp_vulnerability_patterns()
+    print("✓ test_c_cpp_vulnerability_patterns passed")
     test_chunk_diff_smart()
     print("✓ test_chunk_diff_smart passed")
     test_count_scanned_lines()
@@ -285,4 +302,4 @@ if __name__ == "__main__":
 
     test_should_fail_on_severity()
     print("✓ test_should_fail_on_severity passed")
-    print("🎉 All 17 unit tests passed successfully!")
+    print("🎉 All 18 unit tests passed successfully!")

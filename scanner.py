@@ -8,7 +8,7 @@ import html
 from typing import Any, Dict, List, Optional
 import requests
 
-VERSION = "2.6.0"
+VERSION = "2.7.0"
 
 COMMON_SECRET_PATTERNS = [
     (r'(?i)(?:aws_access_key_id|aws_secret_access_key|aws_session_token)\s*=\s*["\']?([A-Za-z0-9/+=]{20,})', "AWS Credential Leak", "10.0"),
@@ -42,6 +42,11 @@ LANGUAGE_VULN_PATTERNS = [
     # PHP
     (r'(?i)(?:system|shell_exec|passthru|proc_open)\s*\(', "PHP Command Execution Vulnerability (system/shell_exec)", "9.5"),
     (r'(?i)unserialize\s*\(', "PHP Insecure Object Deserialization (unserialize)", "9.0"),
+
+    # C / C++
+    (r'\bgets\s*\(', "C/C++ Highly Dangerous Function (gets - Buffer Overflow)", "9.8"),
+    (r'\b(?:strcpy|strcat)\s*\(', "C/C++ Insecure Unbounded String Copy (strcpy/strcat Buffer Overflow)", "8.5"),
+    (r'(?<![a-zA-Z0-9_])sprintf\s*\(', "C/C++ Format String / Buffer Overflow Risk (sprintf)", "8.0"),
 ]
 
 DEFAULT_IGNORE_PATTERNS = [
@@ -96,7 +101,7 @@ def chunk_diff_smart(diff_text: str, max_chars: int = 12000) -> str:
     prioritized_hunks: List[str] = []
     other_hunks: List[str] = []
 
-    high_risk_exts = ('.py', '.go', '.rs', '.js', '.ts', '.java', '.php', '.c', '.cpp', '.rb', '.sh', '.yml', '.yaml')
+    high_risk_exts = ('.py', '.go', '.rs', '.js', '.ts', '.java', '.php', '.c', '.cpp', '.h', '.hpp', '.rb', '.sh', '.yml', '.yaml')
 
     for chunk in file_diffs:
         chunk = chunk.strip()
@@ -741,7 +746,10 @@ def main():
         except Exception as e:
             report_sections.append(f"*(AI analysis unavailable: {e})*")
 
+    badge_img = "https://img.shields.io/badge/Codex%20Audit-ISSUES%20FOUND-red" if findings else "https://img.shields.io/badge/Codex%20Audit-PASSED-brightgreen"
+
     final_comment = (
+        f"![Security Status]({badge_img})\n\n"
         f"### 🛡️ Codex Security Audit Report (v{VERSION})\n\n"
         + "\n\n".join(report_sections)
         + f"\n\n---\n*Automated audit powered by [codex-security-linter](https://github.com/knmt1219/codex-security-linter)*"
