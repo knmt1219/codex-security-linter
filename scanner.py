@@ -3,7 +3,10 @@ import sys
 import re
 import json
 import argparse
+import html
 import requests
+
+VERSION = "2.0.0"
 
 COMMON_SECRET_PATTERNS = [
     (r'(?i)(?:aws_access_key_id|aws_secret_access_key|aws_session_token)\s*=\s*["\']?([A-Za-z0-9/+=]{20,})', "AWS Credential Leak", "10.0"),
@@ -19,6 +22,14 @@ LANGUAGE_VULN_PATTERNS = [
     (r'(?i)dangerouslySetInnerHTML', "Cross-Site Scripting (XSS) via dangerouslySetInnerHTML", "7.5"),
     (r'(?i)pickle\.loads\s*\(', "Insecure Deserialization (pickle.loads)", "9.8"),
 ]
+
+SEVERITY_RANKS = {
+    "INFO": 0,
+    "LOW": 1,
+    "MEDIUM": 2,
+    "HIGH": 3,
+    "CRITICAL": 4,
+}
 
 def mask_sensitive_value(line: str) -> str:
     def mask_match(m):
@@ -97,6 +108,147 @@ def generate_svg_badge(has_issues: bool, output_path: str = "security-badge.svg"
 </svg>"""
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(svg_content)
+    print(f"SVG security badge generated at: {output_path}")
+
+def export_html(findings: list, output_path: str = "security-report.html"):
+    critical_count = sum(1 for f in findings if f.get("severity") == "CRITICAL")
+    high_count = sum(1 for f in findings if f.get("severity") == "HIGH")
+    medium_count = sum(1 for f in findings if f.get("severity") == "MEDIUM")
+    low_count = sum(1 for f in findings if f.get("severity") in ("LOW", "INFO"))
+    total_count = len(findings)
+    status_text = "FAILED" if total_count > 0 else "PASSED"
+    status_color = "#e53e3e" if total_count > 0 else "#38a169"
+
+    table_rows = ""
+    if findings:
+        for f in findings:
+            sev = f.get("severity", "LOW")
+            badge_class = "badge-critical" if sev == "CRITICAL" else ("badge-high" if sev == "HIGH" else "badge-medium")
+            safe_type = html.escape(str(f.get("type", "")))
+            safe_score = html.escape(str(f.get("score", "N/A")))
+            safe_conf = html.escape(str(f.get("confidence", "N/A")))
+            safe_snip = html.escape(str(f.get("snippet", "")))
+            table_rows += f"""
+            <tr>
+                <td><span class="badge {badge_class}">{sev}</span></td>
+                <td><strong>{safe_type}</strong></td>
+                <td><span class="cvss-score">{safe_score}</span></td>
+                <td>{safe_conf}</td>
+                <td><code>{safe_snip}</code></td>
+            </tr>
+            """
+    else:
+        table_rows = """
+        <tr>
+            <td colspan="5" style="text-align: center; color: #718096; padding: 2rem;">
+                🎉 No vulnerabilities or security risks detected in scanned diff!
+            </td>
+        </tr>
+        """
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codex Security Linter - Audit Report v{VERSION}</title>
+    <style>
+        :root {{
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #334155;
+            --text-primary: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-red: #ef4444;
+            --accent-orange: #f97316;
+            --accent-green: #10b981;
+            --accent-blue: #3b82f6;
+            --border-color: #475569;
+        }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }}
+        body {{ background-color: var(--bg-primary); color: var(--text-primary); padding: 2rem; }}
+        .container {{ max-width: 1200px; margin: 0 auto; }}
+        header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-color); }}
+        .header-title h1 {{ font-size: 1.8rem; display: flex; align-items: center; gap: 0.5rem; }}
+        .header-title p {{ color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }}
+        .status-badge {{ background: {status_color}; color: #fff; padding: 0.5rem 1rem; border-radius: 9999px; font-weight: bold; font-size: 0.9rem; text-transform: uppercase; }}
+        .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }}
+        .card {{ background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1.25rem; text-align: center; }}
+        .card-value {{ font-size: 2rem; font-weight: bold; margin-top: 0.5rem; }}
+        .text-red {{ color: var(--accent-red); }}
+        .text-orange {{ color: var(--accent-orange); }}
+        .text-green {{ color: var(--accent-green); }}
+        .table-container {{ background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 0.5rem; overflow-x: auto; }}
+        table {{ width: 100%; border-collapse: collapse; text-align: left; font-size: 0.95rem; }}
+        th, td {{ padding: 1rem; border-bottom: 1px solid var(--border-color); }}
+        th {{ background: rgba(0,0,0,0.2); color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.05em; }}
+        tr:hover {{ background: rgba(255,255,255,0.02); }}
+        .badge {{ display: inline-block; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: bold; font-size: 0.75rem; }}
+        .badge-critical {{ background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; }}
+        .badge-high {{ background: rgba(249, 115, 22, 0.2); color: #fb923c; border: 1px solid #f97316; }}
+        .badge-medium {{ background: rgba(234, 179, 8, 0.2); color: #facc15; border: 1px solid #eab308; }}
+        .cvss-score {{ font-weight: bold; color: #cbd5e1; }}
+        code {{ background: #0f172a; border: 1px solid var(--border-color); color: #38bdf8; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-family: 'Fira Code', monospace; font-size: 0.85rem; word-break: break-all; }}
+        footer {{ margin-top: 2.5rem; text-align: center; color: var(--text-muted); font-size: 0.85rem; }}
+        footer a {{ color: var(--accent-blue); text-decoration: none; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-title">
+                <h1>🛡️ Codex Security Linter Report</h1>
+                <p>AI-Powered Vulnerability & Secret Leak Audit Engine v{VERSION}</p>
+            </div>
+            <div class="status-badge">{status_text}</div>
+        </header>
+
+        <div class="metrics-grid">
+            <div class="card">
+                <div>Total Findings</div>
+                <div class="card-value">{total_count}</div>
+            </div>
+            <div class="card">
+                <div>Critical Severity</div>
+                <div class="card-value text-red">{critical_count}</div>
+            </div>
+            <div class="card">
+                <div>High Severity</div>
+                <div class="card-value text-orange">{high_count}</div>
+            </div>
+            <div class="card">
+                <div>Audit Status</div>
+                <div class="card-value text-green" style="color: {status_color};">{status_text}</div>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Severity</th>
+                        <th>Vulnerability Type</th>
+                        <th>CVSS</th>
+                        <th>Confidence</th>
+                        <th>Code Snippet</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {table_rows}
+                </tbody>
+            </table>
+        </div>
+
+        <footer>
+            Audited automatically by <a href="https://github.com/knmt1219/codex-security-linter">Codex Security Linter v{VERSION}</a> &bull; Open Source MIT License
+        </footer>
+    </div>
+</body>
+</html>
+"""
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    print(f"✅ Interactive HTML report exported to: {output_path}")
 
 def export_sarif(findings: list, output_path: str = "results.sarif"):
     sarif_data = {
@@ -106,7 +258,7 @@ def export_sarif(findings: list, output_path: str = "results.sarif"):
             "tool": {
                 "driver": {
                     "name": "Codex Security Linter",
-                    "version": "1.8.0",
+                    "version": VERSION,
                     "informationUri": "https://github.com/knmt1219/codex-security-linter",
                     "rules": [{
                         "id": "CSL001",
@@ -118,14 +270,26 @@ def export_sarif(findings: list, output_path: str = "results.sarif"):
             "results": [
                 {
                     "ruleId": "CSL001",
-                    "level": "error" if f["severity"] in ["CRITICAL", "HIGH"] else "warning",
-                    "message": {"text": f"{f['type']} (CVSS: {f['score']}) in `{f['snippet']}`"}
+                    "level": "error" if f.get("severity") in ["CRITICAL", "HIGH"] else "warning",
+                    "message": {"text": f"{f.get('type')} (CVSS: {f.get('score')}) in `{f.get('snippet')}`"}
                 } for f in findings
             ]
         }]
     }
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(sarif_data, f, indent=2)
+
+def should_fail_on_severity(findings: list, fail_on_threshold: str) -> bool:
+    """Return True if any finding meets or exceeds the specified fail_on severity threshold."""
+    if not fail_on_threshold or not findings:
+        return False
+    
+    threshold_rank = SEVERITY_RANKS.get(fail_on_threshold.upper(), 3)
+    for f in findings:
+        sev = f.get("severity", "LOW").upper()
+        if SEVERITY_RANKS.get(sev, 1) >= threshold_rank:
+            return True
+    return False
 
 def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-mini") -> str:
     try:
@@ -154,16 +318,29 @@ def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-m
     return res.choices[0].message.content
 
 def main():
-    parser = argparse.ArgumentParser(description="Codex Security Linter CLI & GitHub Action")
+    parser = argparse.ArgumentParser(description=f"Codex Security Linter CLI & GitHub Action (v{VERSION})")
     parser.add_argument("--local", action="store_true", help="Run scan on local git diff")
     parser.add_argument("--sarif", type=str, help="Export scan results to SARIF format")
     parser.add_argument("--json", type=str, help="Export scan results to JSON format")
+    parser.add_argument("--html", type=str, help="Export interactive HTML security dashboard report")
     parser.add_argument("--badge", action="store_true", help="Generate SVG status badge")
     parser.add_argument("--strict", action="store_true", help="Fail with exit code 1 if critical/high risks found")
+    parser.add_argument(
+        "--fail-on",
+        type=str,
+        choices=["CRITICAL", "HIGH", "MEDIUM", "LOW", "critical", "high", "medium", "low"],
+        help="Exit with code 1 if findings meet or exceed the specified severity threshold",
+    )
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     model_name = os.environ.get("MODEL_NAME", "gpt-4o-mini")
+
+    fail_threshold = None
+    if args.fail_on:
+        fail_threshold = args.fail_on.upper()
+    elif args.strict:
+        fail_threshold = "HIGH"
 
     if args.local:
         diff_text = os.popen("git diff HEAD~1").read()
@@ -173,7 +350,7 @@ def main():
             print("No local git changes detected to audit.")
             return
 
-        print("🔍 Running Heuristic & Language-Aware Security Scan (v1.8.0)...")
+        print(f"🔍 Running Heuristic & Language-Aware Security Scan (v{VERSION})...")
         findings = heuristic_scan_structured(diff_text)
         if args.badge:
             generate_svg_badge(bool(findings))
@@ -187,11 +364,16 @@ def main():
                 with open(args.json, "w", encoding="utf-8") as jf:
                     json.dump(findings, jf, indent=2)
                 print(f"JSON report exported to: {args.json}")
-            if args.strict:
-                print("\n❌ Strict mode: Vulnerabilities detected. Exiting with error.")
+            if args.html:
+                export_html(findings, args.html)
+            
+            if fail_threshold and should_fail_on_severity(findings, fail_threshold):
+                print(f"\n❌ Threshold violation: Vulnerabilities matching or exceeding '{fail_threshold}' detected. Exiting with error.")
                 sys.exit(1)
         else:
             print("✅ Heuristic Scan: Clean (No secrets or dangerous patterns detected)")
+            if args.html:
+                export_html(findings, args.html)
 
         if api_key:
             print("\n🤖 Running Deep AI Security Analysis...")
@@ -238,6 +420,8 @@ def main():
     if args.json:
         with open(args.json, "w", encoding="utf-8") as jf:
             json.dump(findings, jf, indent=2)
+    if args.html:
+        export_html(findings, args.html)
 
     if api_key:
         try:
@@ -247,13 +431,16 @@ def main():
             report_sections.append(f"*(AI analysis unavailable: {e})*")
 
     final_comment = (
-        "### 🛡️ Codex Security Audit Report (v1.8.0)\n\n"
+        f"### 🛡️ Codex Security Audit Report (v{VERSION})\n\n"
         + "\n\n".join(report_sections)
-        + "\n\n---\n*Automated audit powered by [codex-security-linter](https://github.com/knmt1219/codex-security-linter)*"
+        + f"\n\n---\n*Automated audit powered by [codex-security-linter](https://github.com/knmt1219/codex-security-linter)*"
     )
 
     post_comment(repo_full_name, pr_number, token, final_comment)
     print("Security audit executed and posted successfully.")
+
+    if fail_threshold and should_fail_on_severity(findings, fail_threshold):
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

@@ -1,10 +1,21 @@
-import pytest
+import sys
+import pathlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
+try:
+    import pytest
+except ImportError:
+    pytest = None
+
 from scanner import (
     heuristic_scan_structured,
     build_markdown_summary_table,
     mask_sensitive_value,
     generate_svg_badge,
     export_sarif,
+    export_html,
+    should_fail_on_severity,
 )
 
 def test_mask_sensitive_value():
@@ -54,3 +65,66 @@ def test_export_sarif(tmp_path):
     }]
     export_sarif(findings, str(sarif_file))
     assert sarif_file.exists()
+
+def test_export_html(tmp_path):
+    html_file = tmp_path / "security-report.html"
+    findings = [{
+        "severity": "CRITICAL",
+        "type": "AWS Credential Leak",
+        "score": "10.0",
+        "confidence": "99%",
+        "snippet": "aws_access_key_id = 'AKIA...LE12'"
+    }]
+    export_html(findings, str(html_file))
+    assert html_file.exists()
+    content = html_file.read_text(encoding="utf-8")
+    assert "<!DOCTYPE html>" in content
+    assert "Codex Security Linter Report" in content
+    assert "AWS Credential Leak" in content
+    assert "badge-critical" in content
+
+def test_should_fail_on_severity():
+    critical_findings = [{"severity": "CRITICAL"}]
+    high_findings = [{"severity": "HIGH"}]
+    low_findings = [{"severity": "LOW"}]
+
+    # When threshold is CRITICAL
+    assert should_fail_on_severity(critical_findings, "CRITICAL") is True
+    assert should_fail_on_severity(high_findings, "CRITICAL") is False
+
+    # When threshold is HIGH
+    assert should_fail_on_severity(critical_findings, "HIGH") is True
+    assert should_fail_on_severity(high_findings, "HIGH") is True
+    assert should_fail_on_severity(low_findings, "HIGH") is False
+
+    # When threshold is LOW
+    assert should_fail_on_severity(low_findings, "LOW") is True
+
+if __name__ == "__main__":
+    import tempfile
+
+    if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
+    print("Running unit tests...")
+    test_mask_sensitive_value()
+    print("✓ test_mask_sensitive_value passed")
+    test_heuristic_scan_structured()
+    print("✓ test_heuristic_scan_structured passed")
+    test_build_markdown_summary_table()
+    print("✓ test_build_markdown_summary_table passed")
+
+    with tempfile.TemporaryDirectory() as td:
+        tp = pathlib.Path(td)
+        test_generate_svg_badge(tp)
+        print("✓ test_generate_svg_badge passed")
+        test_export_sarif(tp)
+        print("✓ test_export_sarif passed")
+        test_export_html(tp)
+        print("✓ test_export_html passed")
+
+    test_should_fail_on_severity()
+    print("✓ test_should_fail_on_severity passed")
+    print("🎉 All unit tests passed!")
