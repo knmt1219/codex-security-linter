@@ -8,7 +8,7 @@
 [![Languages](https://img.shields.io/badge/Languages-Python%20%7C%20JS%2FTS%20%7C%20React%20%7C%20Go%20%7C%20Rust%20%7C%20Java%20%7C%20PHP%20%7C%20C%2FC%2B%2B-orange.svg)](https://github.com/knmt1219/codex-security-linter)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-lightgrey.svg)](https://github.com/knmt1219/codex-security-linter)
 
-**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, **Docker Container**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, webshells, malware payloads, and security vulnerabilities across code diffs in **Python**, **JavaScript/TypeScript**, **React**, **Go**, **Rust**, **Java**, **PHP**, and **C/C++** with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, execution performance metrics, smart diff chunking, dark-mode interactive HTML dashboards with real-time severity filters, direct status badge embedding in PR comments, and SARIF/JSON reporting.
+**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, **Docker Container**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, webshells, malware payloads, and security vulnerabilities across code diffs or offline directories in **Python**, **JavaScript/TypeScript**, **React**, **Go**, **Rust**, **Java**, **PHP**, and **C/C++** with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, execution performance metrics, smart diff chunking, dark-mode interactive HTML dashboards with real-time severity filters, direct status badge embedding in PR comments, and SARIF/JSON reporting.
 
 ---
 
@@ -16,9 +16,9 @@
 
 ```mermaid
 graph LR
-    A[Git Diff / Staged / PR] --> B[codex-security-linter Engine v2.8.0]
-    B --> C{Smart Diff Chunking & Ignore Filter}
-    C -->|Ignored Assets| D[Skip *.min.js, dist/*, build/*, vendor/*, *.lock]
+    A[Git Diff / Staged / Local Path / PR] --> B[codex-security-linter Engine v2.8.0]
+    B --> C{Smart Filter & Ignore Engine}
+    C -->|Ignored Assets| D[Skip *.min.js, dist/*, build/*, vendor/*, .venv, node_modules]
     C -->|Secrets / Credentials| E[Mask Sensitive Values & CVSS 3.1 Impact Scoring]
     C -->|Malware & Webshells| F[Detect Obfuscated Webshells, Reverse Shells, Droppers & Binaries]
     C -->|Multi-Language Code| G[Python, JS/TS, React, Go, Rust, Java, PHP, C/C++ Rules]
@@ -34,6 +34,7 @@ graph LR
 
 ## ✨ Key Features
 
+- 📁 **Zero-Leak Offline Local Scanner (`--path`)**: Audit any standalone file or recursively scan an entire project directory (`python scanner.py --path ./src`) without git diff or external network dependencies.
 - 🦠 **Malware, Webshell & Reverse Shell Detection**:
   - **Obfuscated Webshells**: Identifies stealthy PHP evasion scripts (`eval(base64_decode(...))`, `assert(gzinflate(...))`, `str_rot13`).
   - **Interactive Reverse Shells**: Detects bash/TCP reverse shells (`/dev/tcp/x.x.x.x/port`, `bash -i >& /dev/tcp`), and netcat backdoors (`nc -e /bin/sh`).
@@ -54,7 +55,7 @@ graph LR
 - ⚡ **Smart Diff Chunking Optimizer**: Intelligently parses and prioritizes security-critical diff hunks for large PRs to maximize LLM context efficiency.
 - ⏱️ **Real-Time Performance Metrics**: Displays detailed scan statistics (lines analyzed, execution duration in milliseconds, issue counts).
 - 🎯 **Staged Changes Scanning (`--staged`)**: Audit git staged index changes (`git diff --cached`) before committing to the repository.
-- 🧹 **Smart Minified & Bundled File Filtering**: Automatically ignores compiled/bundled artifacts (`*.min.js`, `*.bundle.js`, `dist/*`, `build/*`, `vendor/*`, `*.lock`) to eliminate false positives.
+- 🧹 **Smart Minified & Bundled File Filtering**: Automatically ignores compiled/bundled artifacts (`*.min.js`, `*.bundle.js`, `dist/*`, `build/*`, `vendor/*`, `*.lock`, `node_modules`, `.venv`) to eliminate false positives.
 - 🖼️ **Automated SVG Security Badges (`security-badge.svg`)**: Automatically generated in GitHub Actions and available on CLI (`--badge`) for embedding in READMEs and CI dashboards.
 - 🐳 **Docker Container Support**: Pre-packaged ultra-lightweight Docker image (`python:3.11-slim`) for seamless containerized execution in any CI/CD environment.
 - ⚙️ **Custom Configuration Path (`--config`)**: Flexible policy customization via `.codex-security.yml` or custom file paths.
@@ -107,7 +108,7 @@ REM Install package
 pip install -e .
 ```
 
-#### Step 2: Configure OpenAI API Key
+#### Step 2: Configure OpenAI API Key (Optional for Deep AI Analysis)
 **PowerShell:**
 ```powershell
 $env:OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
@@ -118,19 +119,22 @@ $env:OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
 set OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-#### Step 3: Run Local Security Audit
+#### Step 3: Run Security Audits
 ```powershell
-# Run heuristic, malware & AI audit on local uncommitted git diff
+# Scan an entire directory or single file offline (No git required)
+codex-security-linter --path ./src
+
+# Scan local uncommitted git changes
 codex-security-linter --local
 
 # Scan staged changes before committing
 codex-security-linter --staged
 
 # Export dark-mode interactive HTML dashboard report and SARIF/JSON
-codex-security-linter --local --html security-report.html --json findings.json --sarif results.sarif
+codex-security-linter --path ./src --html security-report.html --json findings.json --sarif results.sarif
 
 # Stop process (exit code 1) on CRITICAL vulnerabilities
-codex-security-linter --local --fail-on CRITICAL
+codex-security-linter --path ./src --fail-on CRITICAL
 
 # Scaffold pre-commit configuration file
 codex-security-linter --install-hook
@@ -161,18 +165,17 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-#### Step 2: Configure OpenAI API Key
+#### Step 2: Configure OpenAI API Key (Optional)
 ```bash
 # Set for current session
 export OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-
-# (Optional) Persist in ~/.zshrc or ~/.bash_profile
-echo 'export OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"' >> ~/.zshrc
-source ~/.zshrc
 ```
 
-#### Step 3: Run Local Security Audit
+#### Step 3: Run Security Audits
 ```bash
+# Scan a directory offline
+python scanner.py --path ./src
+
 # Run heuristic & AI audit on local git diff
 codex-security-linter --local
 
@@ -180,10 +183,10 @@ codex-security-linter --local
 codex-security-linter --staged --quiet
 
 # Generate dark-mode interactive HTML dashboard and SVG badge
-codex-security-linter --local --html security-report.html --badge
+codex-security-linter --path ./src --html security-report.html --badge
 
 # Enforce fail-on threshold in CI
-codex-security-linter --local --fail-on HIGH
+codex-security-linter --path ./src --fail-on HIGH
 ```
 
 ---
@@ -216,29 +219,22 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-#### Step 2: Configure OpenAI API Key
+#### Step 2: Run Security Audits
 ```bash
-# Set for current session
-export OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+# Offline scan on local folder
+python scanner.py --path ./src
 
-# (Optional) Persist in ~/.bashrc
-echo 'export OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-#### Step 3: Run Local Security Audit
-```bash
-# Run heuristic & AI audit on local git diff
+# Scan local git diff
 codex-security-linter --local
 
 # Scan staged changes quietly
 codex-security-linter --staged --quiet
 
 # Export complete multi-format reports including dark-mode HTML dashboard
-codex-security-linter --local --html security-report.html --json findings.json --sarif results.sarif --badge
+codex-security-linter --path ./src --html security-report.html --json findings.json --sarif results.sarif --badge
 
 # Fail build if any CRITICAL or HIGH vulnerabilities are detected
-codex-security-linter --local --fail-on HIGH
+codex-security-linter --path ./src --fail-on HIGH
 ```
 
 ---
@@ -260,7 +256,7 @@ docker run --rm \
   -v "$(pwd):/app/repo" \
   -w /app/repo \
   -e OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx" \
-  codex-security-linter:v2.8.0 --local --html security-report.html --fail-on HIGH
+  codex-security-linter:v2.8.0 --path ./repo --html security-report.html --fail-on HIGH
 ```
 
 ---
@@ -269,6 +265,7 @@ docker run --rm \
 
 | Option / Flag | Type | Description |
 | :--- | :---: | :--- |
+| `--path <path>` | String | Scan a local file or recursive directory offline without git diff dependency. |
 | `--local` | Flag | Run security audit on local uncommitted `git diff`. |
 | `--staged` | Flag | Run security audit on staged changes (`git diff --cached`). |
 | `--config <path>` | String | Path to custom YAML configuration file (default: `.codex-security.yml`). |
@@ -403,7 +400,8 @@ rules:
 
 ## 🔒 Security & Privacy
 
-- **Diff-Only Transmission**: Only modified code diffs (`git diff`) are audited; entire source trees are never uploaded.
+- **Zero-Leak Offline Capability**: The `--path` scan mode runs 100% locally with zero external network transmission.
+- **Diff-Only Transmission**: In PR/Git mode, only modified code diffs (`git diff`) are audited; entire source trees are never uploaded.
 - **Smart Artifact Filtering**: Automatically excludes minified, bundled, and build assets.
 - **Automatic Secret Masking**: Detected credentials and tokens are masked before being included in reports to prevent secondary exposure.
 - **Enterprise Safe**: Compatible with OpenAI Enterprise data privacy policies.
