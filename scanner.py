@@ -8,7 +8,7 @@ import html
 from typing import Any, Dict, List, Optional
 import requests
 
-VERSION = "2.7.0"
+VERSION = "2.8.0"
 
 COMMON_SECRET_PATTERNS = [
     (r'(?i)(?:aws_access_key_id|aws_secret_access_key|aws_session_token)\s*=\s*["\']?([A-Za-z0-9/+=]{20,})', "AWS Credential Leak", "10.0"),
@@ -16,6 +16,14 @@ COMMON_SECRET_PATTERNS = [
     (r'-----BEGIN\s+([A-Z\s]+)?PRIVATE\s+KEY-----', "Exposed Private Key", "10.0"),
     (r'(?i)(?:api[_-]?key|secret[_-]?key|auth[_-]?token)\s*=\s*["\']([a-zA-Z0-9_\-]{16,})["\']', "Potential Hardcoded API Key/Token", "8.5"),
     (r'(?i)password\s*=\s*["\']([^"\']{4,})["\']', "Hardcoded Plaintext Password", "8.0"),
+]
+
+MALWARE_PATTERNS = [
+    (r'(?i)(?:eval|assert|preg_replace)\s*\(\s*(?:base64_decode|gzinflate|gzuncompress|str_rot13)\s*\(', "Obfuscated Webshell Payload (PHP Obfuscation)", "10.0"),
+    (r'(?i)(?:/dev/tcp/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/\d+|bash\s+-i\s+>&?\s*/dev/tcp)', "Reverse Shell Connection (/dev/tcp)", "10.0"),
+    (r'(?i)(?:nc|netcat|ncat)\s+(?:-[a-zA-Z]*e\s+|.*-c\s+)(?:/bin/sh|/bin/bash|cmd\.exe|powershell)', "Netcat Backdoor / Reverse Shell", "10.0"),
+    (r'(?i)(?:curl|wget)\s+[^|;\n]+\|\s*(?:ba)?sh\b', "Dangerous Remote Execution via Piped Shell (curl/wget | sh)", "9.8"),
+    (r'(?i)powershell(?:\.exe)?\s+.*-(?:enc|encodedcommand|e)\s+[A-Za-z0-9+/=]{8,}', "Encoded PowerShell Dropper / Payload", "9.8"),
 ]
 
 LANGUAGE_VULN_PATTERNS = [
@@ -48,6 +56,10 @@ LANGUAGE_VULN_PATTERNS = [
     (r'\b(?:strcpy|strcat)\s*\(', "C/C++ Insecure Unbounded String Copy (strcpy/strcat Buffer Overflow)", "8.5"),
     (r'(?<![a-zA-Z0-9_])sprintf\s*\(', "C/C++ Format String / Buffer Overflow Risk (sprintf)", "8.0"),
 ]
+
+SUSPICIOUS_EXECUTABLE_EXTS = (
+    '.exe', '.dll', '.so', '.elf', '.vbs', '.bat', '.cmd', '.scr', '.dylib'
+)
 
 DEFAULT_IGNORE_PATTERNS = [
     r'(?i)\.min\.(?:js|css)$',
@@ -109,7 +121,7 @@ def chunk_diff_smart(diff_text: str, max_chars: int = 12000) -> str:
             continue
         first_line = chunk.splitlines()[0] if chunk.splitlines() else ""
         is_high_risk = any(first_line.endswith(ext) or ext in first_line for ext in high_risk_exts)
-        has_suspicious_patterns = any(re.search(p, chunk) for p, _, _ in COMMON_SECRET_PATTERNS + LANGUAGE_VULN_PATTERNS)
+        has_suspicious_patterns = any(re.search(p, chunk) for p, _, _ in COMMON_SECRET_PATTERNS + MALWARE_PATTERNS + LANGUAGE_VULN_PATTERNS)
 
         if is_high_risk or has_suspicious_patterns:
             prioritized_hunks.append(chunk)
@@ -245,17 +257,44 @@ def heuristic_scan_structured(diff_text: str, custom_ignore_paths: Optional[List
     findings = []
     current_file = ""
     ignoring_current_file = False
+    reported_suspicious_files = set()
 
     for line in diff_text.splitlines():
         if line.startswith("diff --git "):
             parts = line.split()
             if len(parts) >= 4:
                 current_file = parts[3]
+                clean_name = current_file.lstrip("b/").strip()
                 ignoring_current_file = is_ignored_file(current_file, custom_ignore_paths)
+                
+                # Check for suspicious binary or script extensions added
+                if not ignoring_current_file and clean_name not in reported_suspicious_files:
+                    if any(clean_name.lower().endswith(ext) for ext in SUSPICIOUS_EXECUTABLE_EXTS):
+                        reported_suspicious_files.add(clean_name)
+                        findings.append({
+                            "severity": "CRITICAL",
+                            "type": "Suspicious Executable Binary / Script Added",
+                            "score": "9.5",
+                            "confidence": "95%",
+                            "file": clean_name,
+                            "snippet": f"Executable artifact detected: {clean_name}"
+                        })
             continue
         elif line.startswith("+++ "):
             current_file = line[4:].strip()
+            clean_name = current_file.lstrip("b/").strip()
             ignoring_current_file = is_ignored_file(current_file, custom_ignore_paths)
+            if not ignoring_current_file and clean_name not in reported_suspicious_files:
+                if any(clean_name.lower().endswith(ext) for ext in SUSPICIOUS_EXECUTABLE_EXTS):
+                    reported_suspicious_files.add(clean_name)
+                    findings.append({
+                        "severity": "CRITICAL",
+                        "type": "Suspicious Executable Binary / Script Added",
+                        "score": "9.5",
+                        "confidence": "95%",
+                        "file": clean_name,
+                        "snippet": f"Executable artifact detected: {clean_name}"
+                    })
             continue
 
         if ignoring_current_file:
@@ -264,6 +303,7 @@ def heuristic_scan_structured(diff_text: str, custom_ignore_paths: Optional[List
         if line.startswith('+') and not line.startswith('+++'):
             clean_line = line[1:].strip()
             masked_line = mask_sensitive_value(clean_line)
+
             for pattern, desc, score in COMMON_SECRET_PATTERNS:
                 if re.search(pattern, line):
                     findings.append({
@@ -274,16 +314,31 @@ def heuristic_scan_structured(diff_text: str, custom_ignore_paths: Optional[List
                         "file": current_file.lstrip("b/"),
                         "snippet": masked_line[:80]
                     })
-            for pattern, desc, score in LANGUAGE_VULN_PATTERNS:
+
+            matched_malware = False
+            for pattern, desc, score in MALWARE_PATTERNS:
                 if re.search(pattern, line):
+                    matched_malware = True
                     findings.append({
-                        "severity": "HIGH",
+                        "severity": "CRITICAL",
                         "type": desc,
                         "score": score,
-                        "confidence": "95%",
+                        "confidence": "99%",
                         "file": current_file.lstrip("b/"),
                         "snippet": masked_line[:80]
                     })
+
+            if not matched_malware:
+                for pattern, desc, score in LANGUAGE_VULN_PATTERNS:
+                    if re.search(pattern, line):
+                        findings.append({
+                            "severity": "HIGH",
+                            "type": desc,
+                            "score": score,
+                            "confidence": "95%",
+                            "file": current_file.lstrip("b/"),
+                            "snippet": masked_line[:80]
+                        })
     return findings
 
 def count_scanned_lines(diff_text: str) -> int:
@@ -355,7 +410,7 @@ def export_html(findings: list, output_path: str = "security-report.html", lines
         table_rows = """
         <tr id="empty-row">
             <td colspan="5" style="text-align: center; color: #94a3b8; padding: 3rem;">
-                🎉 <strong>Clean Diff:</strong> No vulnerabilities or sensitive secret leaks detected!
+                🎉 <strong>Clean Diff:</strong> No vulnerabilities, malware, or sensitive secret leaks detected!
             </td>
         </tr>
         """
