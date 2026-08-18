@@ -8,7 +8,7 @@ import html
 from typing import Any, Dict, List, Optional
 import requests
 
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 
 COMMON_SECRET_PATTERNS = [
     (r'(?i)(?:aws_access_key_id|aws_secret_access_key|aws_session_token)\s*=\s*["\']?([A-Za-z0-9/+=]{20,})', "AWS Credential Leak", "10.0"),
@@ -23,6 +23,9 @@ LANGUAGE_VULN_PATTERNS = [
     (r'(?i)subprocess\.(?:Popen|call|run)\s*\(.*shell\s*=\s*True', "Command Injection Risk (shell=True)", "9.5"),
     (r'(?i)dangerouslySetInnerHTML', "Cross-Site Scripting (XSS) via dangerouslySetInnerHTML", "7.5"),
     (r'(?i)pickle\.loads\s*\(', "Insecure Deserialization (pickle.loads)", "9.8"),
+    (r'(?i)(?:db\.Query|db\.Exec|QueryRow)\s*\(\s*fmt\.Sprintf', "Go SQL Injection Risk (fmt.Sprintf)", "9.0"),
+    (r'(?i)unsafe\.Pointer\s*\(', "Dangerous Go Memory Manipulation (unsafe.Pointer)", "7.0"),
+    (r'\bunsafe\s*\{', "Unsafe Rust Code Block (Memory Safety Risk)", "7.2"),
 ]
 
 DEFAULT_IGNORE_PATTERNS = [
@@ -67,6 +70,45 @@ def is_ignored_file(file_path: str, custom_patterns: Optional[List[str]] = None)
         if re.search(pattern, clean_path):
             return True
     return False
+
+def chunk_diff_smart(diff_text: str, max_chars: int = 12000) -> str:
+    """Smartly prioritize security-critical diff hunks when diff exceeds token budget."""
+    if len(diff_text) <= max_chars:
+        return diff_text
+
+    file_diffs = re.split(r'(?=diff --git )', diff_text)
+    prioritized_hunks: List[str] = []
+    other_hunks: List[str] = []
+
+    high_risk_exts = ('.py', '.go', '.rs', '.js', '.ts', '.java', '.c', '.cpp', '.php', '.rb', '.sh', '.yml', '.yaml')
+
+    for chunk in file_diffs:
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        first_line = chunk.splitlines()[0] if chunk.splitlines() else ""
+        is_high_risk = any(first_line.endswith(ext) or ext in first_line for ext in high_risk_exts)
+        has_suspicious_patterns = any(re.search(p, chunk) for p, _, _ in COMMON_SECRET_PATTERNS + LANGUAGE_VULN_PATTERNS)
+
+        if is_high_risk or has_suspicious_patterns:
+            prioritized_hunks.append(chunk)
+        else:
+            other_hunks.append(chunk)
+
+    selected: List[str] = []
+    current_length = 0
+
+    for h in prioritized_hunks + other_hunks:
+        if current_length + len(h) <= max_chars:
+            selected.append(h)
+            current_length += len(h)
+        else:
+            remaining = max_chars - current_length
+            if remaining > 200:
+                selected.append(h[:remaining] + "\n... [diff truncated for length]")
+            break
+
+    return "\n\n".join(selected) if selected else diff_text[:max_chars]
 
 def parse_simple_yaml(text: str) -> Dict[str, Any]:
     """Lightweight fallback YAML parser for configuration files without external dependencies."""
@@ -435,6 +477,7 @@ def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-m
     except ImportError:
         return "*(OpenAI SDK not installed. Please run `pip install openai` to enable AI vulnerability analysis)*"
 
+    optimized_diff = chunk_diff_smart(diff_text, max_chars=12000)
     client = OpenAI(api_key=api_key)
     prompt = (
         "You are an application security expert auditing an open-source Pull Request.\n"
@@ -443,7 +486,7 @@ def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-m
         "2. Concrete remediation code patches formatted as GitHub suggestions (```suggestion ... ```) when applicable.\n"
         "3. Best practices recommendation.\n"
         "If no vulnerabilities are detected, state: 'No security vulnerabilities detected.'\n\n"
-        f"Diff:\n```diff\n{diff_text[:12000]}\n```"
+        f"Diff:\n```diff\n{optimized_diff}\n```"
     )
     res = client.chat.completions.create(
         model=model_name,

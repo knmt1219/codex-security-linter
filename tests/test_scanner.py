@@ -22,6 +22,7 @@ from scanner import (
     parse_simple_yaml,
     is_ignored_file,
     count_scanned_lines,
+    chunk_diff_smart,
 )
 
 def test_mask_sensitive_value():
@@ -38,6 +39,38 @@ def test_heuristic_scan_structured():
     assert findings[0]["score"] == "10.0"
     assert findings[0]["confidence"] == "99%"
     assert "..." in findings[0]["snippet"]
+
+def test_go_vulnerability_patterns():
+    go_diff = """--- a/user.go
++++ b/user.go
++ rows, err := db.Query(fmt.Sprintf("SELECT * FROM users WHERE name = '%s'", name))
++ ptr := unsafe.Pointer(&data)
+"""
+    findings = heuristic_scan_structured(go_diff)
+    assert len(findings) == 2
+    types = [f["type"] for f in findings]
+    assert "Go SQL Injection Risk (fmt.Sprintf)" in types
+    assert "Dangerous Go Memory Manipulation (unsafe.Pointer)" in types
+
+def test_rust_vulnerability_patterns():
+    rust_diff = """--- a/lib.rs
++++ b/lib.rs
++ unsafe {
++     *raw_ptr = 42;
++ }
+"""
+    findings = heuristic_scan_structured(rust_diff)
+    assert len(findings) == 1
+    assert findings[0]["type"] == "Unsafe Rust Code Block (Memory Safety Risk)"
+
+def test_chunk_diff_smart():
+    small_diff = "+ const x = 10;"
+    assert chunk_diff_smart(small_diff, max_chars=100) == small_diff
+
+    large_diff = "diff --git a/test.py b/test.py\n+ eval('alert()')\n" + ("diff --git a/docs.txt b/docs.txt\n+ info\n" * 50)
+    chunked = chunk_diff_smart(large_diff, max_chars=200)
+    assert len(chunked) <= 300
+    assert "eval('alert()')" in chunked
 
 def test_count_scanned_lines():
     diff = """--- a/file.py
@@ -163,7 +196,7 @@ def test_github_action_outputs(tmp_path):
 
 def test_load_config(tmp_path):
     config_file = tmp_path / "custom.yml"
-    yaml_content = """version: 2.4
+    yaml_content = """version: 2.5
 settings:
   model: "gpt-4o"
   severity_threshold: "HIGH"
@@ -184,11 +217,17 @@ if __name__ == "__main__":
     if sys.stderr and hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
 
-    print("Running unit tests for v2.4.0...")
+    print("Running unit tests for v2.5.0...")
     test_mask_sensitive_value()
     print("✓ test_mask_sensitive_value passed")
     test_heuristic_scan_structured()
     print("✓ test_heuristic_scan_structured passed")
+    test_go_vulnerability_patterns()
+    print("✓ test_go_vulnerability_patterns passed")
+    test_rust_vulnerability_patterns()
+    print("✓ test_rust_vulnerability_patterns passed")
+    test_chunk_diff_smart()
+    print("✓ test_chunk_diff_smart passed")
     test_count_scanned_lines()
     print("✓ test_count_scanned_lines passed")
     test_is_ignored_file()
@@ -213,4 +252,4 @@ if __name__ == "__main__":
 
     test_should_fail_on_severity()
     print("✓ test_should_fail_on_severity passed")
-    print("🎉 All 12 unit tests passed successfully!")
+    print("🎉 All 15 unit tests passed successfully!")
