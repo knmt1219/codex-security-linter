@@ -8,7 +8,7 @@ import html
 from typing import Any, Dict, List, Optional
 import requests
 
-VERSION = "2.5.0"
+VERSION = "2.6.0"
 
 COMMON_SECRET_PATTERNS = [
     (r'(?i)(?:aws_access_key_id|aws_secret_access_key|aws_session_token)\s*=\s*["\']?([A-Za-z0-9/+=]{20,})', "AWS Credential Leak", "10.0"),
@@ -19,13 +19,29 @@ COMMON_SECRET_PATTERNS = [
 ]
 
 LANGUAGE_VULN_PATTERNS = [
-    (r'(?i)(?:eval|exec)\s*\(', "Dangerous Dynamic Code Execution (eval/exec)", "9.0"),
+    # Python
+    (r'(?i)(?<!\.)\b(?:eval|exec)\s*\(', "Dangerous Dynamic Code Execution (eval/exec)", "9.0"),
     (r'(?i)subprocess\.(?:Popen|call|run)\s*\(.*shell\s*=\s*True', "Command Injection Risk (shell=True)", "9.5"),
-    (r'(?i)dangerouslySetInnerHTML', "Cross-Site Scripting (XSS) via dangerouslySetInnerHTML", "7.5"),
     (r'(?i)pickle\.loads\s*\(', "Insecure Deserialization (pickle.loads)", "9.8"),
+
+    # JavaScript / TypeScript / React
+    (r'(?i)dangerouslySetInnerHTML', "Cross-Site Scripting (XSS) via dangerouslySetInnerHTML", "7.5"),
+
+    # Go
     (r'(?i)(?:db\.Query|db\.Exec|QueryRow)\s*\(\s*fmt\.Sprintf', "Go SQL Injection Risk (fmt.Sprintf)", "9.0"),
     (r'(?i)unsafe\.Pointer\s*\(', "Dangerous Go Memory Manipulation (unsafe.Pointer)", "7.0"),
+
+    # Rust
     (r'\bunsafe\s*\{', "Unsafe Rust Code Block (Memory Safety Risk)", "7.2"),
+
+    # Java
+    (r'(?i)(?:Runtime(?:\.getRuntime\(\))?\.exec|ProcessBuilder)\s*\(', "Java Command Execution Risk (Runtime.exec/ProcessBuilder)", "9.5"),
+    (r'(?i)XMLDecoder\s*\(', "Java Insecure Deserialization (XMLDecoder RCE)", "9.8"),
+    (r'(?i)(?:executeQuery|executeUpdate)\s*\(\s*["\'].*\+\s*[a-zA-Z0-9_]+', "Java SQL Injection via String Concatenation", "9.0"),
+
+    # PHP
+    (r'(?i)(?:system|shell_exec|passthru|proc_open)\s*\(', "PHP Command Execution Vulnerability (system/shell_exec)", "9.5"),
+    (r'(?i)unserialize\s*\(', "PHP Insecure Object Deserialization (unserialize)", "9.0"),
 ]
 
 DEFAULT_IGNORE_PATTERNS = [
@@ -80,7 +96,7 @@ def chunk_diff_smart(diff_text: str, max_chars: int = 12000) -> str:
     prioritized_hunks: List[str] = []
     other_hunks: List[str] = []
 
-    high_risk_exts = ('.py', '.go', '.rs', '.js', '.ts', '.java', '.c', '.cpp', '.php', '.rb', '.sh', '.yml', '.yaml')
+    high_risk_exts = ('.py', '.go', '.rs', '.js', '.ts', '.java', '.php', '.c', '.cpp', '.rb', '.sh', '.yml', '.yaml')
 
     for chunk in file_diffs:
         chunk = chunk.strip()
@@ -308,82 +324,107 @@ def export_html(findings: list, output_path: str = "security-report.html", lines
     critical_count = sum(1 for f in findings if f.get("severity") == "CRITICAL")
     high_count = sum(1 for f in findings if f.get("severity") == "HIGH")
     total_count = len(findings)
-    status_text = "FAILED" if total_count > 0 else "PASSED"
-    status_color = "#e53e3e" if total_count > 0 else "#38a169"
+    status_text = "ACTION REQUIRED" if total_count > 0 else "PASSED"
+    status_color = "#ef4444" if total_count > 0 else "#10b981"
 
     table_rows = ""
     if findings:
         for f in findings:
-            sev = f.get("severity", "LOW")
+            sev = f.get("severity", "LOW").upper()
             badge_class = "badge-critical" if sev == "CRITICAL" else ("badge-high" if sev == "HIGH" else "badge-medium")
             safe_type = html.escape(str(f.get("type", "")))
             safe_score = html.escape(str(f.get("score", "N/A")))
             safe_conf = html.escape(str(f.get("confidence", "N/A")))
             safe_snip = html.escape(str(f.get("snippet", "")))
+            safe_file = html.escape(str(f.get("file", "diff")))
             table_rows += f"""
-            <tr>
+            <tr data-severity="{sev}">
                 <td><span class="badge {badge_class}">{sev}</span></td>
-                <td><strong>{safe_type}</strong></td>
+                <td><strong>{safe_type}</strong><br><small class="file-path">📁 {safe_file}</small></td>
                 <td><span class="cvss-score">{safe_score}</span></td>
-                <td>{safe_conf}</td>
+                <td><span class="conf-badge">{safe_conf}</span></td>
                 <td><code>{safe_snip}</code></td>
             </tr>
             """
     else:
         table_rows = """
-        <tr>
-            <td colspan="5" style="text-align: center; color: #718096; padding: 2rem;">
-                🎉 No vulnerabilities or security risks detected in scanned diff!
+        <tr id="empty-row">
+            <td colspan="5" style="text-align: center; color: #94a3b8; padding: 3rem;">
+                🎉 <strong>Clean Diff:</strong> No vulnerabilities or sensitive secret leaks detected!
             </td>
         </tr>
         """
 
     html_content = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Codex Security Linter - Audit Report v{VERSION}</title>
+    <title>Codex Security Linter - Interactive Security Dashboard v{VERSION}</title>
     <style>
         :root {{
-            --bg-primary: #0f172a;
-            --bg-secondary: #1e293b;
-            --bg-card: #334155;
-            --text-primary: #f8fafc;
-            --text-muted: #94a3b8;
+            --bg-primary: #0a0f1d;
+            --bg-secondary: #111827;
+            --bg-card: #1f2937;
+            --bg-card-hover: #374151;
+            --text-primary: #f9fafb;
+            --text-muted: #9ca3af;
             --accent-red: #ef4444;
             --accent-orange: #f97316;
+            --accent-yellow: #eab308;
             --accent-green: #10b981;
             --accent-blue: #3b82f6;
-            --border-color: #475569;
+            --accent-purple: #a855f7;
+            --border-color: #374151;
         }}
         * {{ margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }}
-        body {{ background-color: var(--bg-primary); color: var(--text-primary); padding: 2rem; }}
-        .container {{ max-width: 1200px; margin: 0 auto; }}
-        header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-color); }}
-        .header-title h1 {{ font-size: 1.8rem; display: flex; align-items: center; gap: 0.5rem; }}
-        .header-title p {{ color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }}
-        .status-badge {{ background: {status_color}; color: #fff; padding: 0.5rem 1rem; border-radius: 9999px; font-weight: bold; font-size: 0.9rem; text-transform: uppercase; }}
+        body {{ background: var(--bg-primary); color: var(--text-primary); padding: 2rem 1.5rem; min-height: 100vh; }}
+        .container {{ max-width: 1280px; margin: 0 auto; }}
+        header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; gap: 1rem; }}
+        .header-title h1 {{ font-size: 1.85rem; font-weight: 800; display: flex; align-items: center; gap: 0.6rem; letter-spacing: -0.025em; }}
+        .header-title p {{ color: var(--text-muted); font-size: 0.9rem; margin-top: 0.35rem; }}
+        .status-badge {{ background: {status_color}; color: #fff; padding: 0.5rem 1.25rem; border-radius: 9999px; font-weight: 700; font-size: 0.85rem; letter-spacing: 0.05em; text-transform: uppercase; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }}
+        
         .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }}
-        .card {{ background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1.25rem; text-align: center; }}
-        .card-value {{ font-size: 1.8rem; font-weight: bold; margin-top: 0.5rem; }}
+        .card {{ background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 1.25rem; text-align: center; transition: transform 0.2s, border-color 0.2s; }}
+        .card:hover {{ transform: translateY(-2px); border-color: var(--accent-blue); }}
+        .card-label {{ font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); font-weight: 600; letter-spacing: 0.05em; }}
+        .card-value {{ font-size: 2rem; font-weight: 800; margin-top: 0.4rem; }}
+        
         .text-red {{ color: var(--accent-red); }}
         .text-orange {{ color: var(--accent-orange); }}
         .text-green {{ color: var(--accent-green); }}
         .text-blue {{ color: var(--accent-blue); }}
-        .table-container {{ background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 0.5rem; overflow-x: auto; }}
-        table {{ width: 100%; border-collapse: collapse; text-align: left; font-size: 0.95rem; }}
-        th, td {{ padding: 1rem; border-bottom: 1px solid var(--border-color); }}
-        th {{ background: rgba(0,0,0,0.2); color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.05em; }}
+        .text-purple {{ color: var(--accent-purple); }}
+
+        .toolbar {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem; }}
+        .filter-buttons {{ display: flex; gap: 0.5rem; flex-wrap: wrap; }}
+        .filter-btn {{ background: var(--bg-secondary); color: var(--text-muted); border: 1px solid var(--border-color); padding: 0.45rem 0.9rem; border-radius: 0.5rem; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }}
+        .filter-btn:hover {{ background: var(--bg-card-hover); color: var(--text-primary); }}
+        .filter-btn.active {{ background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }}
+        .filter-btn.active-critical {{ background: var(--accent-red); color: #fff; border-color: var(--accent-red); }}
+        .filter-btn.active-high {{ background: var(--accent-orange); color: #fff; border-color: var(--accent-orange); }}
+        
+        .search-box {{ background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.45rem 0.9rem; border-radius: 0.5rem; font-size: 0.85rem; outline: none; width: 240px; }}
+        .search-box:focus {{ border-color: var(--accent-blue); }}
+
+        .table-container {{ background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 0.75rem; overflow-x: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }}
+        table {{ width: 100%; border-collapse: collapse; text-align: left; font-size: 0.92rem; }}
+        th, td {{ padding: 1rem 1.2rem; border-bottom: 1px solid var(--border-color); vertical-align: middle; }}
+        th {{ background: rgba(0,0,0,0.25); color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }}
         tr:hover {{ background: rgba(255,255,255,0.02); }}
-        .badge {{ display: inline-block; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: bold; font-size: 0.75rem; }}
-        .badge-critical {{ background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; }}
-        .badge-high {{ background: rgba(249, 115, 22, 0.2); color: #fb923c; border: 1px solid #f97316; }}
-        .badge-medium {{ background: rgba(234, 179, 8, 0.2); color: #facc15; border: 1px solid #eab308; }}
-        .cvss-score {{ font-weight: bold; color: #cbd5e1; }}
-        code {{ background: #0f172a; border: 1px solid var(--border-color); color: #38bdf8; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-family: 'Fira Code', monospace; font-size: 0.85rem; word-break: break-all; }}
-        footer {{ margin-top: 2.5rem; text-align: center; color: var(--text-muted); font-size: 0.85rem; }}
-        footer a {{ color: var(--accent-blue); text-decoration: none; }}
+        
+        .badge {{ display: inline-block; padding: 0.25rem 0.6rem; border-radius: 0.35rem; font-weight: 700; font-size: 0.75rem; letter-spacing: 0.04em; }}
+        .badge-critical {{ background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }}
+        .badge-high {{ background: rgba(249, 115, 22, 0.15); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.4); }}
+        .badge-medium {{ background: rgba(234, 179, 8, 0.15); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); }}
+        .file-path {{ color: var(--text-muted); font-size: 0.78rem; }}
+        .cvss-score {{ font-weight: 800; color: #e2e8f0; font-size: 0.95rem; }}
+        .conf-badge {{ background: var(--bg-card); padding: 0.2rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; color: #38bdf8; }}
+        code {{ background: #070c18; border: 1px solid var(--border-color); color: #38bdf8; padding: 0.25rem 0.5rem; border-radius: 0.35rem; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85rem; word-break: break-all; display: block; }}
+        
+        footer {{ margin-top: 2.5rem; text-align: center; color: var(--text-muted); font-size: 0.85rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color); }}
+        footer a {{ color: var(--accent-blue); text-decoration: none; font-weight: 600; }}
     </style>
 </head>
 <body>
@@ -391,42 +432,51 @@ def export_html(findings: list, output_path: str = "security-report.html", lines
         <header>
             <div class="header-title">
                 <h1>🛡️ Codex Security Linter Report</h1>
-                <p>AI-Powered Vulnerability & Secret Leak Audit Engine v{VERSION}</p>
+                <p>Enterprise AI Security Audit & Vulnerability Engine v{VERSION}</p>
             </div>
             <div class="status-badge">{status_text}</div>
         </header>
 
         <div class="metrics-grid">
             <div class="card">
-                <div>Total Findings</div>
-                <div class="card-value">{total_count}</div>
+                <div class="card-label">Total Findings</div>
+                <div class="card-value text-purple">{total_count}</div>
             </div>
             <div class="card">
-                <div>Critical Severity</div>
+                <div class="card-label">Critical Risks</div>
                 <div class="card-value text-red">{critical_count}</div>
             </div>
             <div class="card">
-                <div>High Severity</div>
+                <div class="card-label">High Severity</div>
                 <div class="card-value text-orange">{high_count}</div>
             </div>
             <div class="card">
-                <div>Lines Scanned</div>
+                <div class="card-label">Lines Scanned</div>
                 <div class="card-value text-blue">{lines_scanned}</div>
             </div>
             <div class="card">
-                <div>Audit Duration</div>
+                <div class="card-label">Execution Time</div>
                 <div class="card-value text-green">{duration_ms:.1f}ms</div>
             </div>
         </div>
 
+        <div class="toolbar">
+            <div class="filter-buttons">
+                <button class="filter-btn active" onclick="filterFindings('ALL', this)">All ({total_count})</button>
+                <button class="filter-btn" onclick="filterFindings('CRITICAL', this)">Critical ({critical_count})</button>
+                <button class="filter-btn" onclick="filterFindings('HIGH', this)">High ({high_count})</button>
+            </div>
+            <input type="text" class="search-box" id="search-input" placeholder="🔍 Search findings..." onkeyup="searchFindings()">
+        </div>
+
         <div class="table-container">
-            <table>
+            <table id="findings-table">
                 <thead>
                     <tr>
-                        <th>Severity</th>
-                        <th>Vulnerability Type</th>
-                        <th>CVSS</th>
-                        <th>Confidence</th>
+                        <th style="width: 110px;">Severity</th>
+                        <th>Vulnerability & File</th>
+                        <th style="width: 90px;">CVSS</th>
+                        <th style="width: 100px;">Confidence</th>
                         <th>Code Snippet</th>
                     </tr>
                 </thead>
@@ -437,9 +487,38 @@ def export_html(findings: list, output_path: str = "security-report.html", lines
         </div>
 
         <footer>
-            Audited automatically by <a href="https://github.com/knmt1219/codex-security-linter">Codex Security Linter v{VERSION}</a> &bull; Open Source MIT License
+            Audited automatically by <a href="https://github.com/knmt1219/codex-security-linter">Codex Security Linter v{VERSION}</a> &bull; Open Source MIT License &bull; Author: Hồ Minh Tuấn
         </footer>
     </div>
+
+    <script>
+        let currentFilter = 'ALL';
+
+        function filterFindings(severity, btn) {{
+            currentFilter = severity;
+            document.querySelectorAll('.filter-btn').forEach(b => b.className = 'filter-btn');
+            if (severity === 'CRITICAL') btn.classList.add('active-critical');
+            else if (severity === 'HIGH') btn.classList.add('active-high');
+            else btn.classList.add('active');
+            applyFilters();
+        }}
+
+        function searchFindings() {{
+            applyFilters();
+        }}
+
+        function applyFilters() {{
+            const search = document.getElementById('search-input').value.toLowerCase();
+            const rows = document.querySelectorAll('#findings-table tbody tr[data-severity]');
+            rows.forEach(row => {{
+                const rowSeverity = row.getAttribute('data-severity');
+                const rowText = row.textContent.toLowerCase();
+                const matchesFilter = (currentFilter === 'ALL' || rowSeverity === currentFilter);
+                const matchesSearch = (!search || rowText.includes(search));
+                row.style.display = (matchesFilter && matchesSearch) ? '' : 'none';
+            }});
+        }}
+    </script>
 </body>
 </html>
 """

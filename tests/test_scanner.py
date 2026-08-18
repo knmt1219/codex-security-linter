@@ -63,6 +63,32 @@ def test_rust_vulnerability_patterns():
     assert len(findings) == 1
     assert findings[0]["type"] == "Unsafe Rust Code Block (Memory Safety Risk)"
 
+def test_java_vulnerability_patterns():
+    java_diff = """--- a/App.java
++++ b/App.java
++ Runtime.getRuntime().exec("sh " + userInput);
++ XMLDecoder decoder = new XMLDecoder(in);
++ stmt.executeQuery("SELECT * FROM accounts WHERE id = " + accountId);
+"""
+    findings = heuristic_scan_structured(java_diff)
+    assert len(findings) == 3
+    types = [f["type"] for f in findings]
+    assert "Java Command Execution Risk (Runtime.exec/ProcessBuilder)" in types
+    assert "Java Insecure Deserialization (XMLDecoder RCE)" in types
+    assert "Java SQL Injection via String Concatenation" in types
+
+def test_php_vulnerability_patterns():
+    php_diff = """--- a/index.php
++++ b/index.php
++ system($_GET['cmd']);
++ $data = unserialize($cookie);
+"""
+    findings = heuristic_scan_structured(php_diff)
+    assert len(findings) == 2
+    types = [f["type"] for f in findings]
+    assert "PHP Command Execution Vulnerability (system/shell_exec)" in types
+    assert "PHP Insecure Object Deserialization (unserialize)" in types
+
 def test_chunk_diff_smart():
     small_diff = "+ const x = 10;"
     assert chunk_diff_smart(small_diff, max_chars=100) == small_diff
@@ -147,7 +173,8 @@ def test_export_html(tmp_path):
         "type": "AWS Credential Leak",
         "score": "10.0",
         "confidence": "99%",
-        "snippet": "aws_access_key_id = 'AKIA...LE12'"
+        "snippet": "aws_access_key_id = 'AKIA...LE12'",
+        "file": "config.py"
     }]
     export_html(findings, str(html_file), lines_scanned=40, duration_ms=15.2)
     assert html_file.exists()
@@ -157,6 +184,8 @@ def test_export_html(tmp_path):
     assert "AWS Credential Leak" in content
     assert "Lines Scanned" in content
     assert "40" in content
+    assert "data-severity=\"CRITICAL\"" in content
+    assert "filterFindings" in content
 
 def test_should_fail_on_severity():
     critical_findings = [{"severity": "CRITICAL"}]
@@ -196,7 +225,7 @@ def test_github_action_outputs(tmp_path):
 
 def test_load_config(tmp_path):
     config_file = tmp_path / "custom.yml"
-    yaml_content = """version: 2.5
+    yaml_content = """version: 2.6
 settings:
   model: "gpt-4o"
   severity_threshold: "HIGH"
@@ -217,7 +246,7 @@ if __name__ == "__main__":
     if sys.stderr and hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
 
-    print("Running unit tests for v2.5.0...")
+    print("Running unit tests for v2.6.0...")
     test_mask_sensitive_value()
     print("✓ test_mask_sensitive_value passed")
     test_heuristic_scan_structured()
@@ -226,6 +255,10 @@ if __name__ == "__main__":
     print("✓ test_go_vulnerability_patterns passed")
     test_rust_vulnerability_patterns()
     print("✓ test_rust_vulnerability_patterns passed")
+    test_java_vulnerability_patterns()
+    print("✓ test_java_vulnerability_patterns passed")
+    test_php_vulnerability_patterns()
+    print("✓ test_php_vulnerability_patterns passed")
     test_chunk_diff_smart()
     print("✓ test_chunk_diff_smart passed")
     test_count_scanned_lines()
@@ -252,4 +285,4 @@ if __name__ == "__main__":
 
     test_should_fail_on_severity()
     print("✓ test_should_fail_on_severity passed")
-    print("🎉 All 15 unit tests passed successfully!")
+    print("🎉 All 17 unit tests passed successfully!")

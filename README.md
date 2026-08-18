@@ -1,14 +1,14 @@
 # Codex Security Linter 🛡️
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://img.shields.io/badge/Release-v2.5.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
+[![Release](https://img.shields.io/badge/Release-v2.6.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-Security%20Linter-purple.svg)](https://github.com/marketplace)
-[![Languages](https://img.shields.io/badge/Languages-Python%20%7C%20JS%2FTS%20%7C%20React%20%7C%20Go%20%7C%20Rust-orange.svg)](https://github.com/knmt1219/codex-security-linter)
+[![Languages](https://img.shields.io/badge/Languages-Python%20%7C%20JS%2FTS%20%7C%20React%20%7C%20Go%20%7C%20Rust%20%7C%20Java%20%7C%20PHP-orange.svg)](https://github.com/knmt1219/codex-security-linter)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-lightgrey.svg)](https://github.com/knmt1219/codex-security-linter)
 
-**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, **Docker Container**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, and security vulnerabilities across code diffs in **Python**, **JavaScript/TypeScript**, **React**, **Go**, and **Rust** with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, execution performance metrics, smart diff chunking, interactive HTML dashboards, automatic SVG status badges, and SARIF/JSON reporting.
+**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, **Docker Container**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, and security vulnerabilities across code diffs in **Python**, **JavaScript/TypeScript**, **React**, **Go**, **Rust**, **Java**, and **PHP** with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, execution performance metrics, smart diff chunking, dark-mode interactive HTML dashboards with real-time severity filters, automatic SVG status badges, and SARIF/JSON reporting.
 
 ---
 
@@ -16,14 +16,14 @@
 
 ```mermaid
 graph LR
-    A[Git Diff / Staged / PR] --> B[codex-security-linter Engine v2.5.0]
+    A[Git Diff / Staged / PR] --> B[codex-security-linter Engine v2.6.0]
     B --> C{Smart Diff Chunking & Ignore Filter}
     C -->|Ignored Assets| D[Skip *.min.js, dist/*, build/*, vendor/*, *.lock]
     C -->|Secrets / Credentials| E[Mask Sensitive Values & CVSS 3.1 Impact Scoring]
-    C -->|Code Vulnerabilities| F[Detect SQLi, RCE, XSS, Unsafe Go/Rust Memory]
+    C -->|Multi-Language Code| F[Python, JS/TS, React, Go, Rust, Java, PHP Rules]
     E & F --> G{Multi-Format Reporting Engine}
     G --> H[📊 PR Markdown Summary Table]
-    G --> I[🌐 Interactive HTML Dashboard]
+    G --> I[🌐 Dark Mode Interactive HTML Dashboard with Filter Buttons]
     G --> J[📄 OASIS SARIF 2.1.0 & JSON]
     G --> K[🖼️ SVG Vector Security Badges]
     G --> L[📤 GitHub Action Output Parameters]
@@ -34,12 +34,14 @@ graph LR
 ## ✨ Key Features
 
 - 📊 **Executive Security Summary Table**: Formats all audit findings into a high-visibility Markdown matrix table (Severity badge, Type, CVSS, Confidence %, Code snippet).
-- 🌐 **Interactive HTML Dashboard (`--html`)**: Generates a modern, standalone HTML5 security audit report with metrics cards and categorized findings.
-- 🦀 **Multi-Language Vulnerability Scanning**:
+- 🌐 **Dark Mode Interactive HTML Dashboard (`--html`)**: Generates a sleek, modern, standalone HTML5/CSS security report with real-time severity filter buttons (All, Critical, High) and interactive search.
+- 🦀 **Comprehensive Multi-Language Vulnerability Scanning**:
   - **Python**: Dynamic execution (`eval`, `exec`), command injection (`subprocess shell=True`), insecure deserialization (`pickle.loads`).
   - **JavaScript / TypeScript / React**: Cross-site scripting (`dangerouslySetInnerHTML`).
   - **Go**: SQL injection risks via `fmt.Sprintf` query construction, dangerous memory manipulation (`unsafe.Pointer`).
   - **Rust**: Memory safety violations and unconstrained `unsafe` code blocks.
+  - **Java**: Dangerous command execution (`Runtime.getRuntime().exec`, `ProcessBuilder`), insecure deserialization (`XMLDecoder`), SQL injection via string concatenation (`executeQuery`, `executeUpdate`).
+  - **PHP**: Remote command execution (`system`, `shell_exec`, `passthru`, `proc_open`), object deserialization vulnerabilities (`unserialize`).
 - ⚡ **Smart Diff Chunking Optimizer**: Intelligently parses and prioritizes security-critical diff hunks for large PRs to maximize LLM context efficiency.
 - ⏱️ **Real-Time Performance Metrics**: Displays detailed scan statistics (lines analyzed, execution duration in milliseconds, issue counts).
 - 🎯 **Staged Changes Scanning (`--staged`)**: Audit git staged index changes (`git diff --cached`) before committing to the repository.
@@ -115,7 +117,7 @@ codex-security-linter --local
 # Scan staged changes before committing
 codex-security-linter --staged
 
-# Export interactive HTML report and SARIF/JSON
+# Export dark-mode interactive HTML dashboard report and SARIF/JSON
 codex-security-linter --local --html security-report.html --json findings.json --sarif results.sarif
 
 # Stop process (exit code 1) on CRITICAL vulnerabilities
@@ -168,7 +170,7 @@ codex-security-linter --local
 # Audit staged changes quietly
 codex-security-linter --staged --quiet
 
-# Generate interactive HTML dashboard and SVG badge
+# Generate dark-mode interactive HTML dashboard and SVG badge
 codex-security-linter --local --html security-report.html --badge
 
 # Enforce fail-on threshold in CI
@@ -223,7 +225,7 @@ codex-security-linter --local
 # Scan staged changes quietly
 codex-security-linter --staged --quiet
 
-# Export complete multi-format reports including HTML dashboard
+# Export complete multi-format reports including dark-mode HTML dashboard
 codex-security-linter --local --html security-report.html --json findings.json --sarif results.sarif --badge
 
 # Fail build if any CRITICAL or HIGH vulnerabilities are detected
@@ -239,7 +241,7 @@ Run Codex Security Linter inside an isolated Docker container without installing
 #### Build Docker Image
 ```bash
 # Build lightweight Docker container image
-docker build -t codex-security-linter:v2.5.0 .
+docker build -t codex-security-linter:v2.6.0 .
 ```
 
 #### Run Security Audit via Docker
@@ -249,7 +251,7 @@ docker run --rm \
   -v "$(pwd):/app/repo" \
   -w /app/repo \
   -e OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx" \
-  codex-security-linter:v2.5.0 --local --html security-report.html --fail-on HIGH
+  codex-security-linter:v2.6.0 --local --html security-report.html --fail-on HIGH
 ```
 
 ---
@@ -263,7 +265,7 @@ docker run --rm \
 | `--config <path>` | String | Path to custom YAML configuration file (default: `.codex-security.yml`). |
 | `--install-hook` | Flag | Automatically scaffold a `.pre-commit-config.yaml` file in the current directory. |
 | `--quiet` | Flag | Quiet mode: suppress informational logs and only output when vulnerabilities/secrets are found. |
-| `--html <path>` | String | Export interactive HTML5 security dashboard report (e.g., `--html security-report.html`). |
+| `--html <path>` | String | Export interactive Dark Mode HTML5 security dashboard report (e.g., `--html security-report.html`). |
 | `--fail-on <level>` | Choice | Exit with code `1` if findings meet or exceed severity (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`). |
 | `--strict` | Flag | Shorthand for `--fail-on HIGH` (exits with code `1` on `CRITICAL` or `HIGH` risks). |
 | `--badge` | Flag | Explicitly generate a vector SVG status badge (`security-badge.svg`) on CLI. |
@@ -298,7 +300,7 @@ Add Codex Security Linter to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/knmt1219/codex-security-linter
-    rev: v2.5.0
+    rev: v2.6.0
     hooks:
       - id: codex-security-linter
 ```
@@ -344,7 +346,7 @@ jobs:
 
       - name: Run Codex Security Linter
         id: security-linter
-        uses: knmt1219/codex-security-linter@v2.5.0
+        uses: knmt1219/codex-security-linter@v2.6.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -372,7 +374,7 @@ jobs:
 Customize scanning behavior by creating a `.codex-security.yml` file in your repository root:
 
 ```yaml
-version: 2.5
+version: 2.6
 settings:
   model: "gpt-4o-mini"
   severity_threshold: "MEDIUM"
