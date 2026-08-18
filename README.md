@@ -1,13 +1,13 @@
 # Codex Security Linter 🛡️
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://img.shields.io/badge/Release-v2.2.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
+[![Release](https://img.shields.io/badge/Release-v2.3.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-Security%20Linter-purple.svg)](https://github.com/marketplace)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-lightgrey.svg)](https://github.com/knmt1219/codex-security-linter)
 
-**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, **Docker Container**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, and security vulnerabilities across code diffs with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, interactive HTML dashboards, SVG status badges, and SARIF/JSON reporting.
+**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, **Docker Container**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, and security vulnerabilities across code diffs with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, interactive HTML dashboards, automatic SVG status badges, smart minified file filters, and SARIF/JSON reporting.
 
 ---
 
@@ -16,10 +16,11 @@
 ```mermaid
 graph LR
     A[Git Diff / Pull Request] --> B[codex-security-linter]
-    B --> C{AI & Heuristic Engine v2.2.0}
-    C -->|Secret Leak| D[Mask Secret & CVSS/Confidence Scoring]
-    C -->|Vulnerabilities| E[Propose Fix Code & SVG Badge]
-    D & E --> F[Post PR Summary Matrix Table / HTML Dashboard / JSON / SARIF / Action Outputs]
+    B --> C{Smart Filter & AI Heuristic v2.3.0}
+    C -->|Ignored Artifacts| D[Skip *.min.js, dist/*, build/*, vendor/*]
+    C -->|Secret Leak| E[Mask Secret & CVSS/Confidence Scoring]
+    C -->|Vulnerabilities| F[Propose Fix Code & Auto SVG Badge]
+    E & F --> G[Post PR Summary Matrix / HTML Dashboard / JSON / SARIF / Action Outputs]
 ```
 
 ---
@@ -27,6 +28,8 @@ graph LR
 ## ✨ Key Features
 
 - 📊 **Executive Security Summary Table**: Formats all audit findings into a high-visibility Markdown matrix table (Severity badge, Type, CVSS, Confidence %, Code snippet).
+- 🧹 **Smart Minified & Bundled File Filtering**: Automatically ignores compiled/bundled artifacts (`*.min.js`, `*.bundle.js`, `dist/*`, `build/*`, `vendor/*`, `*.lock`) to eliminate false positives and speed up scans.
+- 🖼️ **Automated SVG Security Badges (`security-badge.svg`)**: Automatically generated in GitHub Actions and available on CLI (`--badge`) for embedding in READMEs and CI dashboards.
 - 🌐 **Interactive HTML Dashboard (`--html`)**: Generates a modern, standalone HTML5 security audit report with metrics cards and categorized findings.
 - 🐳 **Docker Container Support**: Pre-packaged ultra-lightweight Docker image (`python:3.11-slim`) for seamless containerized execution in any CI/CD environment.
 - ⚙️ **Custom Configuration Path (`--config`)**: Flexible policy customization via `.codex-security.yml` or custom file paths.
@@ -35,7 +38,6 @@ graph LR
 - 🛑 **Configurable Fail-On Threshold (`--fail-on`)**: Automatically fails the CI build (`exit code 1`) if vulnerabilities meet or exceed your specified threshold (`CRITICAL`, `HIGH`, `MEDIUM`, or `LOW`).
 - 🔑 **Secret & Token Leak Detection with Masking**: Catches hardcoded API keys, private certificates, and tokens with rapid regex heuristics, automatically masking sensitive values (`AKIA...12`).
 - 🎯 **CVSS 3.1 Impact Scoring & Confidence Matrix**: Assigns standard CVSS severity scores and confidence percentages to all detected security findings.
-- 🖼️ **Dynamic SVG Security Badges (`--badge`)**: Generates embeddable status badges (`security audit: passed / issues found`) for CI workflows and dashboards.
 - 📄 **Multi-Format Export Support**: Exports findings to industry-standard **SARIF** (`--sarif`), structured **JSON** (`--json`), and interactive **HTML** (`--html`).
 - 💡 **One-Click GitHub Suggestions**: Generates secure code replacements formatted as GitHub suggestions (````suggestion ... ````) directly in PR comments.
 - 🪝 **Pre-commit Hook Integration**: Prevents insecure commits locally before they reach the repository.
@@ -217,7 +219,7 @@ Run Codex Security Linter inside an isolated Docker container without installing
 #### Build Docker Image
 ```bash
 # Build lightweight Docker container image
-docker build -t codex-security-linter:v2.2.0 .
+docker build -t codex-security-linter:v2.3.0 .
 ```
 
 #### Run Security Audit via Docker
@@ -227,7 +229,7 @@ docker run --rm \
   -v "$(pwd):/app/repo" \
   -w /app/repo \
   -e OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx" \
-  codex-security-linter:v2.2.0 --local --html security-report.html --fail-on HIGH
+  codex-security-linter:v2.3.0 --local --html security-report.html --fail-on HIGH
 ```
 
 ---
@@ -242,7 +244,7 @@ docker run --rm \
 | `--html <path>` | String | Export interactive HTML5 security dashboard report (e.g., `--html security-report.html`). |
 | `--fail-on <level>` | Choice | Exit with code `1` if findings meet or exceed severity (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`). |
 | `--strict` | Flag | Shorthand for `--fail-on HIGH` (exits with code `1` on `CRITICAL` or `HIGH` risks). |
-| `--badge` | Flag | Automatically generate a vector SVG status badge (`security-badge.svg`). |
+| `--badge` | Flag | Explicitly generate a vector SVG status badge (`security-badge.svg`) on CLI. |
 | `--json <path>` | String | Export structured scan results to a JSON file (e.g., `--json findings.json`). |
 | `--sarif <path>` | String | Export scan results to OASIS SARIF 2.1.0 format (e.g., `--sarif results.sarif`). |
 
@@ -274,7 +276,7 @@ Add Codex Security Linter to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/knmt1219/codex-security-linter
-    rev: v2.2.0
+    rev: v2.3.0
     hooks:
       - id: codex-security-linter
 ```
@@ -320,7 +322,7 @@ jobs:
 
       - name: Run Codex Security Linter
         id: security-linter
-        uses: knmt1219/codex-security-linter@v2.2.0
+        uses: knmt1219/codex-security-linter@v2.3.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -348,7 +350,7 @@ jobs:
 Customize scanning behavior by creating a `.codex-security.yml` file in your repository root:
 
 ```yaml
-version: 2.2
+version: 2.3
 settings:
   model: "gpt-4o-mini"
   severity_threshold: "MEDIUM"
@@ -367,6 +369,7 @@ rules:
 ## 🔒 Security & Privacy
 
 - **Diff-Only Transmission**: Only modified code diffs (`git diff`) are audited; entire source trees are never uploaded.
+- **Smart Artifact Filtering**: Automatically excludes minified, bundled, and build assets.
 - **Automatic Secret Masking**: Detected credentials and tokens are masked before being included in reports to prevent secondary exposure.
 - **Enterprise Safe**: Compatible with OpenAI Enterprise data privacy policies.
 

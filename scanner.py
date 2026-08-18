@@ -7,7 +7,7 @@ import html
 from typing import Any, Dict, List, Optional
 import requests
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 COMMON_SECRET_PATTERNS = [
     (r'(?i)(?:aws_access_key_id|aws_secret_access_key|aws_session_token)\s*=\s*["\']?([A-Za-z0-9/+=]{20,})', "AWS Credential Leak", "10.0"),
@@ -22,6 +22,16 @@ LANGUAGE_VULN_PATTERNS = [
     (r'(?i)subprocess\.(?:Popen|call|run)\s*\(.*shell\s*=\s*True', "Command Injection Risk (shell=True)", "9.5"),
     (r'(?i)dangerouslySetInnerHTML', "Cross-Site Scripting (XSS) via dangerouslySetInnerHTML", "7.5"),
     (r'(?i)pickle\.loads\s*\(', "Insecure Deserialization (pickle.loads)", "9.8"),
+]
+
+DEFAULT_IGNORE_PATTERNS = [
+    r'(?i)\.min\.(?:js|css)$',
+    r'(?i)\.bundle\.js$',
+    r'(?i)^(?:dist|build|vendor|node_modules)/',
+    r'(?i)/(?:dist|build|vendor|node_modules)/',
+    r'(?i)\.lock$',
+    r'(?i)package-lock\.json$',
+    r'(?i)yarn\.lock$',
 ]
 
 SEVERITY_RANKS = {
@@ -40,6 +50,24 @@ def mask_sensitive_value(line: str) -> str:
         return val
     return re.sub(r'[A-Za-z0-9_\-]{12,}', mask_match, line)
 
+def is_ignored_file(file_path: str, custom_patterns: Optional[List[str]] = None) -> bool:
+    """Check if file should be ignored from security audit (minified, bundled, build artifacts)."""
+    clean_path = file_path.replace("\\", "/").strip()
+    if clean_path.startswith("b/"):
+        clean_path = clean_path[2:]
+
+    patterns = list(DEFAULT_IGNORE_PATTERNS)
+    if custom_patterns:
+        for p in custom_patterns:
+            # Convert glob-like pattern to regex
+            p_regex = p.replace(".", r"\.").replace("*", ".*")
+            patterns.append(f"(?i){p_regex}")
+
+    for pattern in patterns:
+        if re.search(pattern, clean_path):
+            return True
+    return False
+
 def parse_simple_yaml(text: str) -> Dict[str, Any]:
     """Lightweight fallback YAML parser for configuration files without external dependencies."""
     config: Dict[str, Any] = {}
@@ -50,13 +78,11 @@ def parse_simple_yaml(text: str) -> Dict[str, Any]:
         if not line or line.startswith("#"):
             continue
 
-        # Check section header
         if not raw_line.startswith(" ") and line.endswith(":"):
             current_section = line[:-1].strip()
             config[current_section] = {}
             continue
 
-        # Sub-keys inside a section
         if current_section and raw_line.startswith("  ") and ":" in line:
             parts = line.split(":", 1)
             k = parts[0].strip()
@@ -65,7 +91,6 @@ def parse_simple_yaml(text: str) -> Dict[str, Any]:
                 config[current_section][k] = v
             continue
 
-        # Lists
         if current_section and line.startswith("- "):
             item = line[2:].strip().strip('"').strip("'")
             if not isinstance(config[current_section], list):
@@ -73,7 +98,6 @@ def parse_simple_yaml(text: str) -> Dict[str, Any]:
             config[current_section].append(item)
             continue
 
-        # Top-level key: value
         if ":" in line:
             parts = line.split(":", 1)
             k = parts[0].strip()
@@ -137,9 +161,27 @@ def post_comment(repo_full_name: str, pr_number: int, github_token: str, body: s
     res = requests.post(url, headers=headers, json={"body": body}, timeout=30)
     return res.status_code == 201
 
-def heuristic_scan_structured(diff_text: str) -> list:
+def heuristic_scan_structured(diff_text: str, custom_ignore_paths: Optional[List[str]] = None) -> list:
     findings = []
+    current_file = ""
+    ignoring_current_file = False
+
     for line in diff_text.splitlines():
+        # Track file changes in diff
+        if line.startswith("diff --git "):
+            parts = line.split()
+            if len(parts) >= 4:
+                current_file = parts[3]
+                ignoring_current_file = is_ignored_file(current_file, custom_ignore_paths)
+            continue
+        elif line.startswith("+++ "):
+            current_file = line[4:].strip()
+            ignoring_current_file = is_ignored_file(current_file, custom_ignore_paths)
+            continue
+
+        if ignoring_current_file:
+            continue
+
         if line.startswith('+') and not line.startswith('+++'):
             clean_line = line[1:].strip()
             masked_line = mask_sensitive_value(clean_line)
@@ -150,6 +192,7 @@ def heuristic_scan_structured(diff_text: str) -> list:
                         "type": desc,
                         "score": score,
                         "confidence": "99%",
+                        "file": current_file.lstrip("b/"),
                         "snippet": masked_line[:80]
                     })
             for pattern, desc, score in LANGUAGE_VULN_PATTERNS:
@@ -159,6 +202,7 @@ def heuristic_scan_structured(diff_text: str) -> list:
                         "type": desc,
                         "score": score,
                         "confidence": "95%",
+                        "file": current_file.lstrip("b/"),
                         "snippet": masked_line[:80]
                     })
     return findings
@@ -422,6 +466,7 @@ def main():
     # Load configuration file
     config = load_config(args.config)
     settings = config.get("settings", {}) if isinstance(config.get("settings"), dict) else {}
+    ignore_paths = config.get("ignore_paths", []) if isinstance(config.get("ignore_paths"), list) else []
 
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     model_name = os.environ.get("MODEL_NAME") or settings.get("model") or "gpt-4o-mini"
@@ -445,7 +490,7 @@ def main():
 
         if not args.quiet:
             print(f"🔍 Running Heuristic & Language-Aware Security Scan (v{VERSION})...")
-        findings = heuristic_scan_structured(diff_text)
+        findings = heuristic_scan_structured(diff_text, ignore_paths)
         if args.badge:
             generate_svg_badge(bool(findings))
 
@@ -502,12 +547,13 @@ def main():
 
     if not diff_text.strip():
         print("Empty or inaccessible diff.")
+        generate_svg_badge(False)
         write_github_action_outputs([], args.sarif or "", args.html or "")
         return
 
-    findings = heuristic_scan_structured(diff_text)
-    if args.badge:
-        generate_svg_badge(bool(findings))
+    findings = heuristic_scan_structured(diff_text, ignore_paths)
+    # Tự động tạo SVG badge mặc định trong GitHub Actions
+    generate_svg_badge(bool(findings))
 
     summary_table = build_markdown_summary_table(findings)
     report_sections = [f"#### 📊 Executive Security Summary\n{summary_table}"]

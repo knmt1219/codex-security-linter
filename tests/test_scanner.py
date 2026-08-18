@@ -20,6 +20,7 @@ from scanner import (
     write_github_action_outputs,
     load_config,
     parse_simple_yaml,
+    is_ignored_file,
 )
 
 def test_mask_sensitive_value():
@@ -36,6 +37,29 @@ def test_heuristic_scan_structured():
     assert findings[0]["score"] == "10.0"
     assert findings[0]["confidence"] == "99%"
     assert "..." in findings[0]["snippet"]
+
+def test_is_ignored_file():
+    assert is_ignored_file("bundle.min.js") is True
+    assert is_ignored_file("app.min.css") is True
+    assert is_ignored_file("dist/app.js") is True
+    assert is_ignored_file("build/bundle.js") is True
+    assert is_ignored_file("vendor/lib.js") is True
+    assert is_ignored_file("package-lock.json") is True
+    assert is_ignored_file("src/auth.py") is False
+
+def test_minified_file_diff_ignored():
+    diff = """diff --git a/dist/bundle.min.js b/dist/bundle.min.js
+--- a/dist/bundle.min.js
++++ b/dist/bundle.min.js
++ aws_access_key_id = 'AKIAIOSFODNN7EXAMPLE12'
+diff --git a/src/app.py b/src/app.py
+--- a/src/app.py
++++ b/src/app.py
++ aws_access_key_id = 'AKIAIOSFODNN7EXAMPLE12'
+"""
+    findings = heuristic_scan_structured(diff)
+    assert len(findings) == 1
+    assert findings[0]["file"] == "src/app.py"
 
 def test_build_markdown_summary_table():
     findings = [{
@@ -125,7 +149,7 @@ def test_github_action_outputs(tmp_path):
 
 def test_load_config(tmp_path):
     config_file = tmp_path / "custom.yml"
-    yaml_content = """version: 2.2
+    yaml_content = """version: 2.3
 settings:
   model: "gpt-4o"
   severity_threshold: "HIGH"
@@ -146,11 +170,15 @@ if __name__ == "__main__":
     if sys.stderr and hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
 
-    print("Running unit tests for v2.2.0...")
+    print("Running unit tests for v2.3.0...")
     test_mask_sensitive_value()
     print("✓ test_mask_sensitive_value passed")
     test_heuristic_scan_structured()
     print("✓ test_heuristic_scan_structured passed")
+    test_is_ignored_file()
+    print("✓ test_is_ignored_file passed")
+    test_minified_file_diff_ignored()
+    print("✓ test_minified_file_diff_ignored passed")
     test_build_markdown_summary_table()
     print("✓ test_build_markdown_summary_table passed")
 
@@ -169,4 +197,4 @@ if __name__ == "__main__":
 
     test_should_fail_on_severity()
     print("✓ test_should_fail_on_severity passed")
-    print("🎉 All 9 unit tests passed successfully!")
+    print("🎉 All 11 unit tests passed successfully!")
