@@ -1,7 +1,7 @@
 # Codex Security Linter 🛡️
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
+[![Release](https://img.shields.io/badge/Release-v2.1.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-Security%20Linter-purple.svg)](https://github.com/marketplace)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/knmt1219/codex-security-linter)
@@ -15,10 +15,10 @@
 ```mermaid
 graph LR
     A[Git Diff / Pull Request] --> B[codex-security-linter]
-    B --> C{AI & Heuristic Engine v2.0.0}
+    B --> C{AI & Heuristic Engine v2.1.0}
     C -->|Secret Leak| D[Mask Secret & CVSS/Confidence Scoring]
     C -->|Vulnerabilities| E[Propose Fix Code & SVG Badge]
-    D & E --> F[Post PR Summary Matrix Table / HTML Dashboard / JSON / SARIF / CLI Output]
+    D & E --> F[Post PR Summary Matrix Table / HTML Dashboard / JSON / SARIF / Action Outputs]
 ```
 
 ---
@@ -27,6 +27,8 @@ graph LR
 
 - 📊 **Executive Security Summary Table**: Formats all audit findings into a high-visibility Markdown matrix table (Severity badge, Type, CVSS, Confidence %, Code snippet).
 - 🌐 **Interactive HTML Dashboard (`--html`)**: Generates a modern, standalone HTML5 security audit report with metrics cards and categorized findings.
+- 📤 **GitHub Action Output Parameters**: Emits `findings-count`, `has-critical`, `sarif-path`, and `html-report-path` to `$GITHUB_OUTPUT` for downstream CI/CD workflow automation.
+- 🤫 **Quiet Mode (`--quiet`)**: Silent CLI execution mode for clean pre-commit hooks that only produces output when security flaws are detected.
 - 🛑 **Configurable Fail-On Threshold (`--fail-on`)**: Automatically fails the CI build (`exit code 1`) if vulnerabilities meet or exceed your specified threshold (`CRITICAL`, `HIGH`, `MEDIUM`, or `LOW`).
 - 🔑 **Secret & Token Leak Detection with Masking**: Catches hardcoded API keys, private certificates, and tokens with rapid regex heuristics, automatically masking sensitive values (`AKIA...12`).
 - 🎯 **CVSS 3.1 Impact Scoring & Confidence Matrix**: Assigns standard CVSS severity scores and confidence percentages to all detected security findings.
@@ -91,6 +93,9 @@ set OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
 # Run heuristic & AI audit on local git diff
 codex-security-linter --local
 
+# Run quietly (only outputs if security issues are detected)
+codex-security-linter --local --quiet
+
 # Export interactive HTML report and SARIF/JSON
 codex-security-linter --local --html security-report.html --json findings.json --sarif results.sarif
 
@@ -137,6 +142,9 @@ source ~/.zshrc
 ```bash
 # Run heuristic & AI audit on local git diff
 codex-security-linter --local
+
+# Run quietly for pre-commit checks
+codex-security-linter --local --quiet
 
 # Generate interactive HTML dashboard and SVG badge
 codex-security-linter --local --html security-report.html --badge
@@ -204,12 +212,24 @@ codex-security-linter --local --fail-on HIGH
 | Option / Flag | Type | Description |
 | :--- | :---: | :--- |
 | `--local` | Flag | Run security audit on local `git diff` instead of GitHub Action environment. |
+| `--quiet` | Flag | Quiet mode: suppress informational logs and only output when vulnerabilities/secrets are found. |
 | `--html <path>` | String | Export interactive HTML5 security dashboard report (e.g., `--html security-report.html`). |
 | `--fail-on <level>` | Choice | Exit with code `1` if findings meet or exceed severity (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`). |
 | `--strict` | Flag | Shorthand for `--fail-on HIGH` (exits with code `1` on `CRITICAL` or `HIGH` risks). |
 | `--badge` | Flag | Automatically generate a vector SVG status badge (`security-badge.svg`). |
 | `--json <path>` | String | Export structured scan results to a JSON file (e.g., `--json findings.json`). |
 | `--sarif <path>` | String | Export scan results to OASIS SARIF 2.1.0 format (e.g., `--sarif results.sarif`). |
+
+---
+
+## 📤 GitHub Action Outputs Reference
+
+| Output Variable | Type | Description |
+| :--- | :---: | :--- |
+| `findings-count` | Number | Total count of security flaws and secret leaks detected. |
+| `has-critical` | Boolean | `true` if any `CRITICAL` vulnerability was detected; `false` otherwise. |
+| `sarif-path` | String | Path to the generated SARIF report file. |
+| `html-report-path` | String | Path to the generated interactive HTML report file. |
 
 ---
 
@@ -228,7 +248,7 @@ Add Codex Security Linter to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/knmt1219/codex-security-linter
-    rev: v2.0.0
+    rev: v2.1.0
     hooks:
       - id: codex-security-linter
 ```
@@ -243,7 +263,7 @@ pre-commit install
 
 ## 🚀 GitHub Action Quick Setup
 
-Automate security audits on every Pull Request.
+Automate security audits on every Pull Request and consume output parameters.
 
 ### 1. Add Repository Secret
 In your GitHub repository, navigate to **Settings > Secrets and variables > Actions** and add:
@@ -273,11 +293,26 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Codex Security Linter
-        uses: knmt1219/codex-security-linter@v2.0.0
+        id: security-linter
+        uses: knmt1219/codex-security-linter@v2.1.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           model: 'gpt-4o-mini'
+          fail-on: 'HIGH'
+          html: 'security-report.html'
+          sarif: 'results.sarif'
+
+      - name: Upload Security Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: ${{ steps.security-linter.outputs.html-report-path }}
+
+      - name: Check Critical Vulnerabilities
+        if: steps.security-linter.outputs.has-critical == 'true'
+        run: echo "🚨 Critical vulnerabilities detected in Pull Request!"
 ```
 
 ---
@@ -287,7 +322,7 @@ jobs:
 Customize scanning behavior by creating a `.codex-security.yml` file in your repository root:
 
 ```yaml
-version: 2.0
+version: 2.1
 settings:
   model: "gpt-4o-mini"
   severity_threshold: "MEDIUM"

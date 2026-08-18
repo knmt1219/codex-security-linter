@@ -4,9 +4,10 @@ import re
 import json
 import argparse
 import html
+from typing import Any
 import requests
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 COMMON_SECRET_PATTERNS = [
     (r'(?i)(?:aws_access_key_id|aws_secret_access_key|aws_session_token)\s*=\s*["\']?([A-Za-z0-9/+=]{20,})', "AWS Credential Leak", "10.0"),
@@ -38,6 +39,25 @@ def mask_sensitive_value(line: str) -> str:
             return val[:4] + "..." + val[-4:]
         return val
     return re.sub(r'[A-Za-z0-9_\-]{12,}', mask_match, line)
+
+def set_github_output(name: str, value: Any):
+    """Write an output parameter to $GITHUB_OUTPUT file in GitHub Actions."""
+    output_file = os.environ.get("GITHUB_OUTPUT")
+    if output_file:
+        try:
+            with open(output_file, "a", encoding="utf-8") as f:
+                f.write(f"{name}={value}\n")
+        except Exception as e:
+            print(f"Warning: Failed to write output to GITHUB_OUTPUT: {e}", file=sys.stderr)
+
+def write_github_action_outputs(findings: list, sarif_path: str = "", html_path: str = ""):
+    """Record GitHub Action step outputs for subsequent workflow steps."""
+    total_count = len(findings)
+    has_critical = any(f.get("severity") == "CRITICAL" for f in findings)
+    set_github_output("findings-count", str(total_count))
+    set_github_output("has-critical", "true" if has_critical else "false")
+    set_github_output("sarif-path", sarif_path or "")
+    set_github_output("html-report-path", html_path or "")
 
 def get_pr_diff(repo_full_name: str, pr_number: int, github_token: str) -> str:
     url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}"
@@ -113,8 +133,6 @@ def generate_svg_badge(has_issues: bool, output_path: str = "security-badge.svg"
 def export_html(findings: list, output_path: str = "security-report.html"):
     critical_count = sum(1 for f in findings if f.get("severity") == "CRITICAL")
     high_count = sum(1 for f in findings if f.get("severity") == "HIGH")
-    medium_count = sum(1 for f in findings if f.get("severity") == "MEDIUM")
-    low_count = sum(1 for f in findings if f.get("severity") in ("LOW", "INFO"))
     total_count = len(findings)
     status_text = "FAILED" if total_count > 0 else "PASSED"
     status_color = "#e53e3e" if total_count > 0 else "#38a169"
@@ -325,6 +343,7 @@ def main():
     parser.add_argument("--html", type=str, help="Export interactive HTML security dashboard report")
     parser.add_argument("--badge", action="store_true", help="Generate SVG status badge")
     parser.add_argument("--strict", action="store_true", help="Fail with exit code 1 if critical/high risks found")
+    parser.add_argument("--quiet", action="store_true", help="Quiet mode: only output messages when security issues are found")
     parser.add_argument(
         "--fail-on",
         type=str,
@@ -347,10 +366,12 @@ def main():
         if not diff_text.strip():
             diff_text = os.popen("git diff").read()
         if not diff_text.strip():
-            print("No local git changes detected to audit.")
+            if not args.quiet:
+                print("No local git changes detected to audit.")
             return
 
-        print(f"🔍 Running Heuristic & Language-Aware Security Scan (v{VERSION})...")
+        if not args.quiet:
+            print(f"🔍 Running Heuristic & Language-Aware Security Scan (v{VERSION})...")
         findings = heuristic_scan_structured(diff_text)
         if args.badge:
             generate_svg_badge(bool(findings))
@@ -371,12 +392,14 @@ def main():
                 print(f"\n❌ Threshold violation: Vulnerabilities matching or exceeding '{fail_threshold}' detected. Exiting with error.")
                 sys.exit(1)
         else:
-            print("✅ Heuristic Scan: Clean (No secrets or dangerous patterns detected)")
+            if not args.quiet:
+                print("✅ Heuristic Scan: Clean (No secrets or dangerous patterns detected)")
             if args.html:
                 export_html(findings, args.html)
 
         if api_key:
-            print("\n🤖 Running Deep AI Security Analysis...")
+            if not args.quiet:
+                print("\n🤖 Running Deep AI Security Analysis...")
             ai_report = audit_diff_with_ai(diff_text, api_key, model_name)
             print("\n" + ai_report)
         return
@@ -406,6 +429,7 @@ def main():
 
     if not diff_text.strip():
         print("Empty or inaccessible diff.")
+        write_github_action_outputs([], args.sarif or "", args.html or "")
         return
 
     findings = heuristic_scan_structured(diff_text)
@@ -422,6 +446,9 @@ def main():
             json.dump(findings, jf, indent=2)
     if args.html:
         export_html(findings, args.html)
+
+    # Ghi nhận Output variables cho GitHub Actions
+    write_github_action_outputs(findings, args.sarif or "", args.html or "")
 
     if api_key:
         try:

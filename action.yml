@@ -3,6 +3,7 @@ description: 'Automated AI-powered security linter & vulnerability auditor for P
 branding:
   icon: 'shield'
   color: 'purple'
+
 inputs:
   github-token:
     description: 'GitHub Token for authentication'
@@ -14,6 +15,33 @@ inputs:
     description: 'Model to use for auditing'
     required: false
     default: 'gpt-4o-mini'
+  fail-on:
+    description: 'Fail build if findings meet or exceed severity threshold (CRITICAL, HIGH, MEDIUM, LOW)'
+    required: false
+    default: ''
+  sarif:
+    description: 'Path to export SARIF report'
+    required: false
+    default: ''
+  html:
+    description: 'Path to export interactive HTML dashboard'
+    required: false
+    default: ''
+
+outputs:
+  findings-count:
+    description: 'Total number of security vulnerabilities and secret leaks detected'
+    value: ${{ steps.audit.outputs.findings-count }}
+  has-critical:
+    description: 'Whether any critical severity vulnerabilities or secret leaks were detected (true/false)'
+    value: ${{ steps.audit.outputs.has-critical }}
+  sarif-path:
+    description: 'File path to the exported SARIF report'
+    value: ${{ steps.audit.outputs.sarif-path }}
+  html-report-path:
+    description: 'File path to the exported HTML report'
+    value: ${{ steps.audit.outputs.html-report-path }}
+
 runs:
   using: 'composite'
   steps:
@@ -21,14 +49,25 @@ runs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+
     - name: Install dependencies
       shell: bash
       run: pip install -r ${{ github.action_path }}/requirements.txt
+
     - name: Run Security Audit
+      id: audit
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         MODEL_NAME: ${{ inputs.model }}
         GITHUB_EVENT_PATH: ${{ github.event_path }}
-      run: python ${{ github.action_path }}/scanner.py
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_SARIF: ${{ inputs.sarif }}
+        INPUT_HTML: ${{ inputs.html }}
+      run: |
+        EXTRA_ARGS=""
+        if [ -n "$INPUT_FAIL_ON" ]; then EXTRA_ARGS="$EXTRA_ARGS --fail-on $INPUT_FAIL_ON"; fi
+        if [ -n "$INPUT_SARIF" ]; then EXTRA_ARGS="$EXTRA_ARGS --sarif $INPUT_SARIF"; fi
+        if [ -n "$INPUT_HTML" ]; then EXTRA_ARGS="$EXTRA_ARGS --html $INPUT_HTML"; fi
+        python ${{ github.action_path }}/scanner.py $EXTRA_ARGS

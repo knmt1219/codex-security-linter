@@ -1,4 +1,5 @@
 import sys
+import os
 import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -16,6 +17,7 @@ from scanner import (
     export_sarif,
     export_html,
     should_fail_on_severity,
+    write_github_action_outputs,
 )
 
 def test_mask_sensitive_value():
@@ -100,6 +102,25 @@ def test_should_fail_on_severity():
     # When threshold is LOW
     assert should_fail_on_severity(low_findings, "LOW") is True
 
+def test_github_action_outputs(tmp_path):
+    output_file = tmp_path / "github_output.txt"
+    os.environ["GITHUB_OUTPUT"] = str(output_file)
+    findings = [{
+        "severity": "CRITICAL",
+        "type": "AWS Credential Leak",
+        "score": "10.0",
+        "confidence": "99%",
+        "snippet": "aws_access_key_id = 'AKIA...LE12'"
+    }]
+    write_github_action_outputs(findings, "results.sarif", "security-report.html")
+    assert output_file.exists()
+    content = output_file.read_text(encoding="utf-8")
+    assert "findings-count=1" in content
+    assert "has-critical=true" in content
+    assert "sarif-path=results.sarif" in content
+    assert "html-report-path=security-report.html" in content
+    del os.environ["GITHUB_OUTPUT"]
+
 if __name__ == "__main__":
     import tempfile
 
@@ -108,7 +129,7 @@ if __name__ == "__main__":
     if sys.stderr and hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
 
-    print("Running unit tests...")
+    print("Running unit tests for v2.1.0...")
     test_mask_sensitive_value()
     print("✓ test_mask_sensitive_value passed")
     test_heuristic_scan_structured()
@@ -124,7 +145,9 @@ if __name__ == "__main__":
         print("✓ test_export_sarif passed")
         test_export_html(tp)
         print("✓ test_export_html passed")
+        test_github_action_outputs(tp)
+        print("✓ test_github_action_outputs passed")
 
     test_should_fail_on_severity()
     print("✓ test_should_fail_on_severity passed")
-    print("🎉 All unit tests passed!")
+    print("🎉 All 8 unit tests passed successfully!")
