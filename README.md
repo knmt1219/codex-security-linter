@@ -5,9 +5,10 @@
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-Security%20Linter-purple.svg)](https://github.com/marketplace)
+[![Languages](https://img.shields.io/badge/Languages-Python%20%7C%20JS%2FTS%20%7C%20React%20%7C%20Go%20%7C%20Rust-orange.svg)](https://github.com/knmt1219/codex-security-linter)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-lightgrey.svg)](https://github.com/knmt1219/codex-security-linter)
 
-**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, **Docker Container**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, and security vulnerabilities across code diffs in **Python**, **JavaScript/TypeScript**, **Go**, and **Rust** with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, execution performance metrics, smart diff chunking, interactive HTML dashboards, automatic SVG status badges, and SARIF/JSON reporting.
+**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, **Docker Container**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, and security vulnerabilities across code diffs in **Python**, **JavaScript/TypeScript**, **React**, **Go**, and **Rust** with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, execution performance metrics, smart diff chunking, interactive HTML dashboards, automatic SVG status badges, and SARIF/JSON reporting.
 
 ---
 
@@ -15,12 +16,17 @@
 
 ```mermaid
 graph LR
-    A[Git Diff / Staged / PR] --> B[codex-security-linter]
-    B --> C{Smart Chunking & Multi-Language Engine v2.5.0}
-    C -->|Python/JS/Go/Rust Flaws| D[Detect SQLi, RCE, XSS, Unsafe Memory]
-    C -->|Secret Leak| E[Mask Secret & CVSS/Confidence Scoring]
-    C -->|Large PR Diffs| F[Smart Chunking & Performance Profiling]
-    D & E & F --> G[Post PR Summary Matrix / HTML Dashboard / JSON / SARIF / Action Outputs]
+    A[Git Diff / Staged / PR] --> B[codex-security-linter Engine v2.5.0]
+    B --> C{Smart Diff Chunking & Ignore Filter}
+    C -->|Ignored Assets| D[Skip *.min.js, dist/*, build/*, vendor/*, *.lock]
+    C -->|Secrets / Credentials| E[Mask Sensitive Values & CVSS 3.1 Impact Scoring]
+    C -->|Code Vulnerabilities| F[Detect SQLi, RCE, XSS, Unsafe Go/Rust Memory]
+    E & F --> G{Multi-Format Reporting Engine}
+    G --> H[📊 PR Markdown Summary Table]
+    G --> I[🌐 Interactive HTML Dashboard]
+    G --> J[📄 OASIS SARIF 2.1.0 & JSON]
+    G --> K[🖼️ SVG Vector Security Badges]
+    G --> L[📤 GitHub Action Output Parameters]
 ```
 
 ---
@@ -28,9 +34,10 @@ graph LR
 ## ✨ Key Features
 
 - 📊 **Executive Security Summary Table**: Formats all audit findings into a high-visibility Markdown matrix table (Severity badge, Type, CVSS, Confidence %, Code snippet).
+- 🌐 **Interactive HTML Dashboard (`--html`)**: Generates a modern, standalone HTML5 security audit report with metrics cards and categorized findings.
 - 🦀 **Multi-Language Vulnerability Scanning**:
   - **Python**: Dynamic execution (`eval`, `exec`), command injection (`subprocess shell=True`), insecure deserialization (`pickle.loads`).
-  - **JavaScript / TypeScript**: Cross-site scripting (`dangerouslySetInnerHTML`).
+  - **JavaScript / TypeScript / React**: Cross-site scripting (`dangerouslySetInnerHTML`).
   - **Go**: SQL injection risks via `fmt.Sprintf` query construction, dangerous memory manipulation (`unsafe.Pointer`).
   - **Rust**: Memory safety violations and unconstrained `unsafe` code blocks.
 - ⚡ **Smart Diff Chunking Optimizer**: Intelligently parses and prioritizes security-critical diff hunks for large PRs to maximize LLM context efficiency.
@@ -38,7 +45,6 @@ graph LR
 - 🎯 **Staged Changes Scanning (`--staged`)**: Audit git staged index changes (`git diff --cached`) before committing to the repository.
 - 🧹 **Smart Minified & Bundled File Filtering**: Automatically ignores compiled/bundled artifacts (`*.min.js`, `*.bundle.js`, `dist/*`, `build/*`, `vendor/*`, `*.lock`) to eliminate false positives.
 - 🖼️ **Automated SVG Security Badges (`security-badge.svg`)**: Automatically generated in GitHub Actions and available on CLI (`--badge`) for embedding in READMEs and CI dashboards.
-- 🌐 **Interactive HTML Dashboard (`--html`)**: Generates a modern, standalone HTML5 security audit report with metrics cards and categorized findings.
 - 🐳 **Docker Container Support**: Pre-packaged ultra-lightweight Docker image (`python:3.11-slim`) for seamless containerized execution in any CI/CD environment.
 - ⚙️ **Custom Configuration Path (`--config`)**: Flexible policy customization via `.codex-security.yml` or custom file paths.
 - 📤 **GitHub Action Output Parameters**: Emits `findings-count`, `has-critical`, `sarif-path`, and `html-report-path` to `$GITHUB_OUTPUT` for downstream CI/CD workflow automation.
@@ -103,7 +109,7 @@ set OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
 
 #### Step 3: Run Local Security Audit
 ```powershell
-# Run heuristic & AI audit on local git diff
+# Run heuristic & AI audit on local uncommitted git diff
 codex-security-linter --local
 
 # Scan staged changes before committing
@@ -114,6 +120,9 @@ codex-security-linter --local --html security-report.html --json findings.json -
 
 # Stop process (exit code 1) on CRITICAL vulnerabilities
 codex-security-linter --local --fail-on CRITICAL
+
+# Scaffold pre-commit configuration file
+codex-security-linter --install-hook
 
 # Generate SVG status badge
 codex-security-linter --local --badge
@@ -156,7 +165,7 @@ source ~/.zshrc
 # Run heuristic & AI audit on local git diff
 codex-security-linter --local
 
-# Audit staged changes
+# Audit staged changes quietly
 codex-security-linter --staged --quiet
 
 # Generate interactive HTML dashboard and SVG badge
@@ -252,6 +261,7 @@ docker run --rm \
 | `--local` | Flag | Run security audit on local uncommitted `git diff`. |
 | `--staged` | Flag | Run security audit on staged changes (`git diff --cached`). |
 | `--config <path>` | String | Path to custom YAML configuration file (default: `.codex-security.yml`). |
+| `--install-hook` | Flag | Automatically scaffold a `.pre-commit-config.yaml` file in the current directory. |
 | `--quiet` | Flag | Quiet mode: suppress informational logs and only output when vulnerabilities/secrets are found. |
 | `--html <path>` | String | Export interactive HTML5 security dashboard report (e.g., `--html security-report.html`). |
 | `--fail-on <level>` | Choice | Exit with code `1` if findings meet or exceed severity (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`). |

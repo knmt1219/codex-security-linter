@@ -110,6 +110,23 @@ def chunk_diff_smart(diff_text: str, max_chars: int = 12000) -> str:
 
     return "\n\n".join(selected) if selected else diff_text[:max_chars]
 
+def install_pre_commit_hook():
+    """Scaffold a .pre-commit-config.yaml configured for Codex Security Linter."""
+    config_path = ".pre-commit-config.yaml"
+    hook_config = f"""repos:
+  - repo: https://github.com/knmt1219/codex-security-linter
+    rev: v{VERSION}
+    hooks:
+      - id: codex-security-linter
+"""
+    if os.path.exists(config_path):
+        print(f"File '{config_path}' already exists. Please verify hook configuration.")
+    else:
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(hook_config)
+        print(f"✅ Generated '{config_path}' configured for Codex Security Linter v{VERSION}.")
+    print("Next step: Run `pre-commit install` to activate the hook locally.")
+
 def parse_simple_yaml(text: str) -> Dict[str, Any]:
     """Lightweight fallback YAML parser for configuration files without external dependencies."""
     config: Dict[str, Any] = {}
@@ -510,6 +527,7 @@ def main():
     parser.add_argument("--strict", action="store_true", help="Fail with exit code 1 if critical/high risks found")
     parser.add_argument("--quiet", action="store_true", help="Quiet mode: only output messages when security issues are found")
     parser.add_argument("--config", type=str, help="Path to custom configuration file (default: .codex-security.yml)")
+    parser.add_argument("--install-hook", action="store_true", help="Scaffold a .pre-commit-config.yaml configured for Codex Security Linter")
     parser.add_argument(
         "--fail-on",
         type=str,
@@ -517,6 +535,10 @@ def main():
         help="Exit with code 1 if findings meet or exceed the specified severity threshold",
     )
     args = parser.parse_args()
+
+    if args.install_hook:
+        install_pre_commit_hook()
+        return
 
     # Load configuration file
     config = load_config(args.config)
