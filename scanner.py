@@ -2,12 +2,13 @@ import os
 import sys
 import re
 import json
+import time
 import argparse
 import html
 from typing import Any, Dict, List, Optional
 import requests
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 
 COMMON_SECRET_PATTERNS = [
     (r'(?i)(?:aws_access_key_id|aws_secret_access_key|aws_session_token)\s*=\s*["\']?([A-Za-z0-9/+=]{20,})', "AWS Credential Leak", "10.0"),
@@ -59,7 +60,6 @@ def is_ignored_file(file_path: str, custom_patterns: Optional[List[str]] = None)
     patterns = list(DEFAULT_IGNORE_PATTERNS)
     if custom_patterns:
         for p in custom_patterns:
-            # Convert glob-like pattern to regex
             p_regex = p.replace(".", r"\.").replace("*", ".*")
             patterns.append(f"(?i){p_regex}")
 
@@ -167,7 +167,6 @@ def heuristic_scan_structured(diff_text: str, custom_ignore_paths: Optional[List
     ignoring_current_file = False
 
     for line in diff_text.splitlines():
-        # Track file changes in diff
         if line.startswith("diff --git "):
             parts = line.split()
             if len(parts) >= 4:
@@ -207,11 +206,17 @@ def heuristic_scan_structured(diff_text: str, custom_ignore_paths: Optional[List
                     })
     return findings
 
-def build_markdown_summary_table(findings: list) -> str:
+def count_scanned_lines(diff_text: str) -> int:
+    """Count total added code lines analyzed from diff."""
+    return sum(1 for line in diff_text.splitlines() if line.startswith('+') and not line.startswith('+++'))
+
+def build_markdown_summary_table(findings: list, lines_scanned: int = 0, duration_ms: float = 0.0) -> str:
+    metrics_line = f"⚡ **Performance:** Scanned `{lines_scanned}` lines in `{duration_ms:.2f}ms` | Findings: `{len(findings)}`\n\n"
     if not findings:
-        return "✅ **Security Status:** No vulnerabilities or secret leaks detected."
+        return metrics_line + "✅ **Security Status:** No vulnerabilities or secret leaks detected."
     
-    table = "| Severity | Vulnerability Type | CVSS | Confidence | Code Snippet |\n"
+    table = metrics_line
+    table += "| Severity | Vulnerability Type | CVSS | Confidence | Code Snippet |\n"
     table += "| :--- | :--- | :---: | :---: | :--- |\n"
     for f in findings:
         badge = "🔴 `CRITICAL`" if f["severity"] == "CRITICAL" else "🟠 `HIGH`"
@@ -240,7 +245,7 @@ def generate_svg_badge(has_issues: bool, output_path: str = "security-badge.svg"
         f.write(svg_content)
     print(f"SVG security badge generated at: {output_path}")
 
-def export_html(findings: list, output_path: str = "security-report.html"):
+def export_html(findings: list, output_path: str = "security-report.html", lines_scanned: int = 0, duration_ms: float = 0.0):
     critical_count = sum(1 for f in findings if f.get("severity") == "CRITICAL")
     high_count = sum(1 for f in findings if f.get("severity") == "HIGH")
     total_count = len(findings)
@@ -300,12 +305,13 @@ def export_html(findings: list, output_path: str = "security-report.html"):
         .header-title h1 {{ font-size: 1.8rem; display: flex; align-items: center; gap: 0.5rem; }}
         .header-title p {{ color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }}
         .status-badge {{ background: {status_color}; color: #fff; padding: 0.5rem 1rem; border-radius: 9999px; font-weight: bold; font-size: 0.9rem; text-transform: uppercase; }}
-        .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }}
+        .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }}
         .card {{ background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1.25rem; text-align: center; }}
-        .card-value {{ font-size: 2rem; font-weight: bold; margin-top: 0.5rem; }}
+        .card-value {{ font-size: 1.8rem; font-weight: bold; margin-top: 0.5rem; }}
         .text-red {{ color: var(--accent-red); }}
         .text-orange {{ color: var(--accent-orange); }}
         .text-green {{ color: var(--accent-green); }}
+        .text-blue {{ color: var(--accent-blue); }}
         .table-container {{ background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 0.5rem; overflow-x: auto; }}
         table {{ width: 100%; border-collapse: collapse; text-align: left; font-size: 0.95rem; }}
         th, td {{ padding: 1rem; border-bottom: 1px solid var(--border-color); }}
@@ -345,8 +351,12 @@ def export_html(findings: list, output_path: str = "security-report.html"):
                 <div class="card-value text-orange">{high_count}</div>
             </div>
             <div class="card">
-                <div>Audit Status</div>
-                <div class="card-value text-green" style="color: {status_color};">{status_text}</div>
+                <div>Lines Scanned</div>
+                <div class="card-value text-blue">{lines_scanned}</div>
+            </div>
+            <div class="card">
+                <div>Audit Duration</div>
+                <div class="card-value text-green">{duration_ms:.1f}ms</div>
             </div>
         </div>
 
@@ -446,8 +456,10 @@ def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-m
     return res.choices[0].message.content
 
 def main():
+    start_time = time.time()
     parser = argparse.ArgumentParser(description=f"Codex Security Linter CLI & GitHub Action (v{VERSION})")
     parser.add_argument("--local", action="store_true", help="Run scan on local git diff")
+    parser.add_argument("--staged", action="store_true", help="Run scan on staged git changes (git diff --cached)")
     parser.add_argument("--sarif", type=str, help="Export scan results to SARIF format")
     parser.add_argument("--json", type=str, help="Export scan results to JSON format")
     parser.add_argument("--html", type=str, help="Export interactive HTML security dashboard report")
@@ -479,24 +491,31 @@ def main():
     elif settings.get("severity_threshold"):
         fail_threshold = str(settings.get("severity_threshold")).upper()
 
-    if args.local:
-        diff_text = os.popen("git diff HEAD~1").read()
-        if not diff_text.strip():
-            diff_text = os.popen("git diff").read()
+    if args.local or args.staged:
+        if args.staged:
+            diff_text = os.popen("git diff --cached").read()
+        else:
+            diff_text = os.popen("git diff HEAD~1").read()
+            if not diff_text.strip():
+                diff_text = os.popen("git diff").read()
+
         if not diff_text.strip():
             if not args.quiet:
                 print("No local git changes detected to audit.")
             return
 
+        lines_scanned = count_scanned_lines(diff_text)
         if not args.quiet:
             print(f"🔍 Running Heuristic & Language-Aware Security Scan (v{VERSION})...")
         findings = heuristic_scan_structured(diff_text, ignore_paths)
+        duration_ms = (time.time() - start_time) * 1000
+
         if args.badge:
             generate_svg_badge(bool(findings))
 
         if findings:
             print("\n📊 Security Summary Matrix:")
-            print(build_markdown_summary_table(findings))
+            print(build_markdown_summary_table(findings, lines_scanned, duration_ms))
             if args.sarif:
                 export_sarif(findings, args.sarif)
             if args.json:
@@ -504,16 +523,16 @@ def main():
                     json.dump(findings, jf, indent=2)
                 print(f"JSON report exported to: {args.json}")
             if args.html:
-                export_html(findings, args.html)
+                export_html(findings, args.html, lines_scanned, duration_ms)
             
             if fail_threshold and should_fail_on_severity(findings, fail_threshold):
                 print(f"\n❌ Threshold violation: Vulnerabilities matching or exceeding '{fail_threshold}' detected. Exiting with error.")
                 sys.exit(1)
         else:
             if not args.quiet:
-                print("✅ Heuristic Scan: Clean (No secrets or dangerous patterns detected)")
+                print(f"✅ Heuristic Scan: Clean (Scanned {lines_scanned} lines in {duration_ms:.2f}ms)")
             if args.html:
-                export_html(findings, args.html)
+                export_html(findings, args.html, lines_scanned, duration_ms)
 
         if api_key:
             if not args.quiet:
@@ -551,11 +570,13 @@ def main():
         write_github_action_outputs([], args.sarif or "", args.html or "")
         return
 
+    lines_scanned = count_scanned_lines(diff_text)
     findings = heuristic_scan_structured(diff_text, ignore_paths)
-    # Tự động tạo SVG badge mặc định trong GitHub Actions
+    duration_ms = (time.time() - start_time) * 1000
+
     generate_svg_badge(bool(findings))
 
-    summary_table = build_markdown_summary_table(findings)
+    summary_table = build_markdown_summary_table(findings, lines_scanned, duration_ms)
     report_sections = [f"#### 📊 Executive Security Summary\n{summary_table}"]
 
     if args.sarif:
@@ -564,7 +585,7 @@ def main():
         with open(args.json, "w", encoding="utf-8") as jf:
             json.dump(findings, jf, indent=2)
     if args.html:
-        export_html(findings, args.html)
+        export_html(findings, args.html, lines_scanned, duration_ms)
 
     # Ghi nhận Output variables cho GitHub Actions
     write_github_action_outputs(findings, args.sarif or "", args.html or "")
@@ -583,7 +604,7 @@ def main():
     )
 
     post_comment(repo_full_name, pr_number, token, final_comment)
-    print("Security audit executed and posted successfully.")
+    print(f"Security audit executed and posted successfully ({lines_scanned} lines scanned in {duration_ms:.2f}ms).")
 
     if fail_threshold and should_fail_on_severity(findings, fail_threshold):
         sys.exit(1)

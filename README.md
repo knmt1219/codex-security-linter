@@ -1,13 +1,13 @@
 # Codex Security Linter 🛡️
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://img.shields.io/badge/Release-v2.3.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
+[![Release](https://img.shields.io/badge/Release-v2.4.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-Security%20Linter-purple.svg)](https://github.com/marketplace)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-lightgrey.svg)](https://github.com/knmt1219/codex-security-linter)
 
-**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, **Docker Container**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, and security vulnerabilities across code diffs with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, interactive HTML dashboards, automatic SVG status badges, smart minified file filters, and SARIF/JSON reporting.
+**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, **Docker Container**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, and security vulnerabilities across code diffs with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, execution performance metrics, interactive HTML dashboards, automatic SVG status badges, smart minified file filters, and SARIF/JSON reporting.
 
 ---
 
@@ -15,11 +15,11 @@
 
 ```mermaid
 graph LR
-    A[Git Diff / Pull Request] --> B[codex-security-linter]
-    B --> C{Smart Filter & AI Heuristic v2.3.0}
+    A[Git Diff / Staged / PR] --> B[codex-security-linter]
+    B --> C{Smart Filter & AI Heuristic v2.4.0}
     C -->|Ignored Artifacts| D[Skip *.min.js, dist/*, build/*, vendor/*]
     C -->|Secret Leak| E[Mask Secret & CVSS/Confidence Scoring]
-    C -->|Vulnerabilities| F[Propose Fix Code & Auto SVG Badge]
+    C -->|Vulnerabilities| F[Propose Fix Code & Performance Metrics]
     E & F --> G[Post PR Summary Matrix / HTML Dashboard / JSON / SARIF / Action Outputs]
 ```
 
@@ -28,6 +28,8 @@ graph LR
 ## ✨ Key Features
 
 - 📊 **Executive Security Summary Table**: Formats all audit findings into a high-visibility Markdown matrix table (Severity badge, Type, CVSS, Confidence %, Code snippet).
+- ⚡ **Real-Time Performance Metrics**: Displays detailed scan statistics (lines analyzed, execution duration in milliseconds, issue counts).
+- 🎯 **Staged Changes Scanning (`--staged`)**: Audit git staged index changes (`git diff --cached`) before committing to the repository.
 - 🧹 **Smart Minified & Bundled File Filtering**: Automatically ignores compiled/bundled artifacts (`*.min.js`, `*.bundle.js`, `dist/*`, `build/*`, `vendor/*`, `*.lock`) to eliminate false positives and speed up scans.
 - 🖼️ **Automated SVG Security Badges (`security-badge.svg`)**: Automatically generated in GitHub Actions and available on CLI (`--badge`) for embedding in READMEs and CI dashboards.
 - 🌐 **Interactive HTML Dashboard (`--html`)**: Generates a modern, standalone HTML5 security audit report with metrics cards and categorized findings.
@@ -98,8 +100,8 @@ set OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
 # Run heuristic & AI audit on local git diff
 codex-security-linter --local
 
-# Run with custom configuration file
-codex-security-linter --local --config custom-rules.yml
+# Scan staged changes before committing
+codex-security-linter --staged
 
 # Export interactive HTML report and SARIF/JSON
 codex-security-linter --local --html security-report.html --json findings.json --sarif results.sarif
@@ -148,8 +150,8 @@ source ~/.zshrc
 # Run heuristic & AI audit on local git diff
 codex-security-linter --local
 
-# Run quietly for pre-commit checks
-codex-security-linter --local --quiet
+# Audit staged changes
+codex-security-linter --staged --quiet
 
 # Generate interactive HTML dashboard and SVG badge
 codex-security-linter --local --html security-report.html --badge
@@ -203,6 +205,9 @@ source ~/.bashrc
 # Run heuristic & AI audit on local git diff
 codex-security-linter --local
 
+# Scan staged changes quietly
+codex-security-linter --staged --quiet
+
 # Export complete multi-format reports including HTML dashboard
 codex-security-linter --local --html security-report.html --json findings.json --sarif results.sarif --badge
 
@@ -219,7 +224,7 @@ Run Codex Security Linter inside an isolated Docker container without installing
 #### Build Docker Image
 ```bash
 # Build lightweight Docker container image
-docker build -t codex-security-linter:v2.3.0 .
+docker build -t codex-security-linter:v2.4.0 .
 ```
 
 #### Run Security Audit via Docker
@@ -229,7 +234,7 @@ docker run --rm \
   -v "$(pwd):/app/repo" \
   -w /app/repo \
   -e OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx" \
-  codex-security-linter:v2.3.0 --local --html security-report.html --fail-on HIGH
+  codex-security-linter:v2.4.0 --local --html security-report.html --fail-on HIGH
 ```
 
 ---
@@ -238,7 +243,8 @@ docker run --rm \
 
 | Option / Flag | Type | Description |
 | :--- | :---: | :--- |
-| `--local` | Flag | Run security audit on local `git diff` instead of GitHub Action environment. |
+| `--local` | Flag | Run security audit on local uncommitted `git diff`. |
+| `--staged` | Flag | Run security audit on staged changes (`git diff --cached`). |
 | `--config <path>` | String | Path to custom YAML configuration file (default: `.codex-security.yml`). |
 | `--quiet` | Flag | Quiet mode: suppress informational logs and only output when vulnerabilities/secrets are found. |
 | `--html <path>` | String | Export interactive HTML5 security dashboard report (e.g., `--html security-report.html`). |
@@ -276,7 +282,7 @@ Add Codex Security Linter to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/knmt1219/codex-security-linter
-    rev: v2.3.0
+    rev: v2.4.0
     hooks:
       - id: codex-security-linter
 ```
@@ -322,7 +328,7 @@ jobs:
 
       - name: Run Codex Security Linter
         id: security-linter
-        uses: knmt1219/codex-security-linter@v2.3.0
+        uses: knmt1219/codex-security-linter@v2.4.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -350,7 +356,7 @@ jobs:
 Customize scanning behavior by creating a `.codex-security.yml` file in your repository root:
 
 ```yaml
-version: 2.3
+version: 2.4
 settings:
   model: "gpt-4o-mini"
   severity_threshold: "MEDIUM"

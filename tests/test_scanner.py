@@ -21,6 +21,7 @@ from scanner import (
     load_config,
     parse_simple_yaml,
     is_ignored_file,
+    count_scanned_lines,
 )
 
 def test_mask_sensitive_value():
@@ -37,6 +38,16 @@ def test_heuristic_scan_structured():
     assert findings[0]["score"] == "10.0"
     assert findings[0]["confidence"] == "99%"
     assert "..." in findings[0]["snippet"]
+
+def test_count_scanned_lines():
+    diff = """--- a/file.py
++++ b/file.py
++ line 1
++ line 2
+- line 3
++ line 4
+"""
+    assert count_scanned_lines(diff) == 3
 
 def test_is_ignored_file():
     assert is_ignored_file("bundle.min.js") is True
@@ -69,10 +80,12 @@ def test_build_markdown_summary_table():
         "confidence": "99%",
         "snippet": "aws_access_key_id = 'AKIA...LE12'"
     }]
-    table = build_markdown_summary_table(findings)
+    table = build_markdown_summary_table(findings, lines_scanned=25, duration_ms=12.5)
     assert "| Severity | Vulnerability Type |" in table
     assert "🔴 `CRITICAL`" in table
     assert "10.0" in table
+    assert "Performance" in table
+    assert "25" in table
 
 def test_generate_svg_badge(tmp_path):
     badge_file = tmp_path / "badge.svg"
@@ -103,13 +116,14 @@ def test_export_html(tmp_path):
         "confidence": "99%",
         "snippet": "aws_access_key_id = 'AKIA...LE12'"
     }]
-    export_html(findings, str(html_file))
+    export_html(findings, str(html_file), lines_scanned=40, duration_ms=15.2)
     assert html_file.exists()
     content = html_file.read_text(encoding="utf-8")
     assert "<!DOCTYPE html>" in content
     assert "Codex Security Linter Report" in content
     assert "AWS Credential Leak" in content
-    assert "badge-critical" in content
+    assert "Lines Scanned" in content
+    assert "40" in content
 
 def test_should_fail_on_severity():
     critical_findings = [{"severity": "CRITICAL"}]
@@ -149,7 +163,7 @@ def test_github_action_outputs(tmp_path):
 
 def test_load_config(tmp_path):
     config_file = tmp_path / "custom.yml"
-    yaml_content = """version: 2.3
+    yaml_content = """version: 2.4
 settings:
   model: "gpt-4o"
   severity_threshold: "HIGH"
@@ -170,11 +184,13 @@ if __name__ == "__main__":
     if sys.stderr and hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
 
-    print("Running unit tests for v2.3.0...")
+    print("Running unit tests for v2.4.0...")
     test_mask_sensitive_value()
     print("✓ test_mask_sensitive_value passed")
     test_heuristic_scan_structured()
     print("✓ test_heuristic_scan_structured passed")
+    test_count_scanned_lines()
+    print("✓ test_count_scanned_lines passed")
     test_is_ignored_file()
     print("✓ test_is_ignored_file passed")
     test_minified_file_diff_ignored()
@@ -197,4 +213,4 @@ if __name__ == "__main__":
 
     test_should_fail_on_severity()
     print("✓ test_should_fail_on_severity passed")
-    print("🎉 All 11 unit tests passed successfully!")
+    print("🎉 All 12 unit tests passed successfully!")
