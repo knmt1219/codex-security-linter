@@ -15,8 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies and package
-COPY requirements.txt pyproject.toml ./
+COPY requirements.txt pyproject.toml README.md ./
 COPY pr_security_linter ./pr_security_linter
+COPY codex_security_linter ./codex_security_linter
+COPY benchmarks ./benchmarks
 COPY scanner.py .
 COPY .pr-security.yml .
 

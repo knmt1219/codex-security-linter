@@ -421,6 +421,60 @@ def test_benchmark_execution():
     assert metrics["f1"] == 1.0
 
 
+import pytest
+from pr_security_linter.analyzers.ai import AIReviewProvider
+
+
+def test_invalid_config_validation(tmp_path):
+    # Unknown/invalid severity
+    bad_config = tmp_path / "bad.yml"
+    bad_config.write_text("settings:\n  severity_threshold: 'SUPER_CRITICAL'\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid severity_threshold"):
+        load_config(str(bad_config))
+
+    # Missing file
+    with pytest.raises(FileNotFoundError):
+        load_config(str(tmp_path / "nonexistent.yml"))
+
+
+def test_secret_masking_in_all_reports(tmp_path):
+    raw_secret = "aws_secret_access_key = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'"
+    diff = f"--- a/config.py\n+++ b/config.py\n+ {raw_secret}\n"
+    findings = heuristic_scan_structured(diff)
+    assert len(findings) == 1
+
+    # 1. Markdown
+    table = build_markdown_summary_table(findings)
+    assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in table
+    assert "..." in table
+
+    # 2. JSON
+    json_path = tmp_path / "masked.json"
+    export_json(findings, str(json_path))
+    json_content = json_path.read_text(encoding="utf-8")
+    assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in json_content
+
+    # 3. HTML
+    html_path = tmp_path / "masked.html"
+    export_html(findings, str(html_path))
+    html_content = html_path.read_text(encoding="utf-8")
+    assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in html_content
+
+    # 4. SARIF
+    sarif_path = tmp_path / "masked.sarif"
+    export_sarif(findings, str(sarif_path))
+    sarif_content = sarif_path.read_text(encoding="utf-8")
+    assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in sarif_content
+
+
+def test_ai_provider_graceful_fallback():
+    # Without API key, AI provider gracefully falls back without network calls
+    provider = AIReviewProvider(api_key="")
+    assert provider.is_available is False
+    res = provider.review_diff("+ const x = 10;")
+    assert "AI review skipped" in res
+
+
 if __name__ == "__main__":
     if sys.stdout and hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")

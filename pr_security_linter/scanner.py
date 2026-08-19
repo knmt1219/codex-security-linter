@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from . import __version__
+from .config import load_config, parse_simple_yaml, validate_config
 from .diff import chunk_diff_smart, count_scanned_lines
 from .engine import SecurityEngine
 from .models import Finding, Severity
@@ -40,72 +41,6 @@ def scan_local_path_offline(target_path: str, custom_ignore_paths: Optional[List
     engine = SecurityEngine(custom_ignore_paths=custom_ignore_paths)
     findings, lines_scanned = engine.scan_path(target_path)
     return [f.to_dict() for f in findings], lines_scanned
-
-
-def parse_simple_yaml(text: str) -> Dict[str, Any]:
-    """Lightweight fallback YAML parser for configuration without external dependencies."""
-    config: Dict[str, Any] = {}
-    current_section: Optional[str] = None
-
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-
-        if not raw_line.startswith(" ") and line.endswith(":"):
-            current_section = line[:-1].strip()
-            config[current_section] = {}
-            continue
-
-        if current_section and raw_line.startswith("  ") and ":" in line:
-            parts = line.split(":", 1)
-            k = parts[0].strip()
-            v = parts[1].strip().strip('"').strip("'")
-            if isinstance(config[current_section], dict):
-                config[current_section][k] = v
-            continue
-
-        if current_section and line.startswith("- "):
-            item = line[2:].strip().strip('"').strip("'")
-            if not isinstance(config[current_section], list):
-                config[current_section] = []
-            config[current_section].append(item)
-            continue
-
-        if ":" in line:
-            parts = line.split(":", 1)
-            k = parts[0].strip()
-            v = parts[1].strip().strip('"').strip("'")
-            config[k] = v
-            current_section = None
-
-    return config
-
-
-def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    """Load configuration from specified path or standard configuration files."""
-    candidate_paths = [config_path] if config_path else [".pr-security.yml", ".pr-security-linter.yml", ".codex-security.yml"]
-
-    for path in candidate_paths:
-        if path and os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    content = f.read()
-
-                try:
-                    import yaml  # type: ignore
-                    data = yaml.safe_load(content)
-                    if isinstance(data, dict):
-                        return data
-                except ImportError:
-                    pass
-
-                return parse_simple_yaml(content)
-            except Exception as e:
-                print(f"Warning: Failed to load config from '{path}': {e}", file=sys.stderr)
-                return {}
-
-    return {}
 
 
 def install_pre_commit_hook() -> None:
@@ -234,7 +169,12 @@ def main() -> None:
         return
 
     # Load configuration
-    config = load_config(args.config)
+    try:
+        config = load_config(args.config)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
     settings = config.get("settings", {}) if isinstance(config.get("settings"), dict) else {}
     ignore_paths = config.get("ignore_paths", []) if isinstance(config.get("ignore_paths"), list) else []
 
