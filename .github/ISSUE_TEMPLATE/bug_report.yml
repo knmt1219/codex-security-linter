@@ -1,22 +1,27 @@
 name: Bug Report
-description: Create a report to help us improve Codex Security Linter
+description: Create a report to help us improve PR Security Linter
 title: "[BUG] "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
-      value: Thanks for taking the time to report a bug!
+      value: Thanks for taking the time to report a bug or false positive in PR Security Linter!
   - type: textarea
     id: description
     attributes:
       label: Describe the bug
-      description: A clear and concise description of what the bug is.
+      description: A clear and concise description of what the bug or false positive is.
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
       label: Steps to reproduce
-      description: How can we reproduce this behavior?
+      description: How can we reproduce this behavior? (Include snippet or CLI invocation if applicable)
     validations:
       required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Info
+      description: Operating System, Python version, CLI or GitHub Action mode.

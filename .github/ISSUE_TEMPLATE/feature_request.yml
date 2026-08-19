@@ -1,5 +1,5 @@
 name: Feature Request
-description: Suggest an idea or feature for Codex Security Linter
+description: Suggest an idea or new pattern for PR Security Linter
 title: "[FEATURE] "
 labels: ["enhancement"]
 body:
@@ -7,6 +7,11 @@ body:
     id: feature
     attributes:
       label: Feature Proposal
-      description: A clear and concise description of what you would like to happen.
+      description: A clear and concise description of what rule, reporter, or integration you would like to see.
     validations:
       required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Use Case / Context
+      description: Why would this feature be useful for pull request security reviews?

@@ -1,7 +1,15 @@
+- id: pr-security-linter
+  name: PR Security Linter
+  description: Fast security linter and secret scanner for git pre-commit
+  entry: pr-security-linter --staged --quiet
+  language: python
+  stages: [pre-commit]
+  always_run: true
+
 - id: codex-security-linter
-  name: Codex Security Linter
-  description: Automatically audit git commits for secrets and security vulnerabilities
-  entry: python -m scanner --local
+  name: PR Security Linter (Legacy alias)
+  description: Fast security linter and secret scanner for git pre-commit (backward compatibility alias)
+  entry: pr-security-linter --staged --quiet
   language: python
   stages: [pre-commit]
   always_run: true

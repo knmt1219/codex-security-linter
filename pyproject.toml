@@ -3,24 +3,48 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codex-security-linter"
-version = "2.8.0"
-description = "Automated AI-powered security linter & vulnerability auditor for Git repositories and Pull Requests."
+name = "pr-security-linter"
+version = "0.9.0"
+description = "Fast, lightweight security linter & secret scanner for Git pull requests and local repositories."
 readme = "README.md"
 authors = [{ name = "Hồ Minh Tuấn", email = "minhtuanho120912@gmail.com" }]
 license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = [
-    "openai>=1.0.0",
     "requests>=2.31.0"
 ]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+keywords = ["security", "linter", "secret-scanner", "static-analysis", "pull-requests", "code-review", "devsecops"]
+
+[project.optional-dependencies]
+ai = [
+    "openai>=1.0.0"
+]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0"
 ]
 
+[project.urls]
+Homepage = "https://github.com/knmt1219/pr-security-linter"
+Repository = "https://github.com/knmt1219/pr-security-linter.git"
+Issues = "https://github.com/knmt1219/pr-security-linter/issues"
+
 [project.scripts]
-codex-security-linter = "scanner:main"
+pr-security-linter = "pr_security_linter.scanner:main"
+codex-security-linter = "pr_security_linter.scanner:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pr_security_linter*"]

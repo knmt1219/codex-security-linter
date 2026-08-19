@@ -1,0 +1,674 @@
+"""Core scanner orchestration, diff analysis, offline filesystem scanning, and CLI entry point."""
+
+import argparse
+import json
+import os
+import pathlib
+import re
+import sys
+import time
+from typing import Any, Dict, List, Optional, Tuple
+import requests
+
+from . import __version__
+from .patterns import (
+    COMMON_SECRET_PATTERNS,
+    IGNORE_DIR_NAMES,
+    LANGUAGE_VULN_PATTERNS,
+    MALWARE_PATTERNS,
+    SEVERITY_RANKS,
+    SUSPICIOUS_EXECUTABLE_EXTS,
+    is_comment_line,
+    is_ignored_file,
+    mask_sensitive_value,
+    strip_inline_comment,
+)
+from .reporters import (
+    build_markdown_summary_table,
+    export_html,
+    export_json,
+    export_sarif,
+    generate_svg_badge,
+)
+
+
+def heuristic_scan_structured(diff_text: str, custom_ignore_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """Analyze git diff line-by-line for secret leaks, malware signatures, and dangerous API calls."""
+    findings: List[Dict[str, Any]] = []
+    current_file = ""
+    ignoring_current_file = False
+    reported_suspicious_files = set()
+
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            parts = line.split()
+            if len(parts) >= 4:
+                current_file = parts[3]
+                clean_name = current_file.lstrip("b/").strip()
+                ignoring_current_file = is_ignored_file(current_file, custom_ignore_paths)
+
+                # Check for suspicious binary or script extensions added
+                if not ignoring_current_file and clean_name not in reported_suspicious_files:
+                    if any(clean_name.lower().endswith(ext) for ext in SUSPICIOUS_EXECUTABLE_EXTS):
+                        reported_suspicious_files.add(clean_name)
+                        findings.append({
+                            "severity": "CRITICAL",
+                            "type": "Suspicious Executable Binary / Script Added",
+                            "score": "9.5",
+                            "confidence": "95%",
+                            "file": clean_name,
+                            "snippet": f"Executable artifact detected: {clean_name}"
+                        })
+            continue
+        elif line.startswith("+++ "):
+            current_file = line[4:].strip()
+            clean_name = current_file.lstrip("b/").strip()
+            ignoring_current_file = is_ignored_file(current_file, custom_ignore_paths)
+            if not ignoring_current_file and clean_name not in reported_suspicious_files:
+                if any(clean_name.lower().endswith(ext) for ext in SUSPICIOUS_EXECUTABLE_EXTS):
+                    reported_suspicious_files.add(clean_name)
+                    findings.append({
+                        "severity": "CRITICAL",
+                        "type": "Suspicious Executable Binary / Script Added",
+                        "score": "9.5",
+                        "confidence": "95%",
+                        "file": clean_name,
+                        "snippet": f"Executable artifact detected: {clean_name}"
+                    })
+            continue
+
+        if ignoring_current_file:
+            continue
+
+        if line.startswith('+') and not line.startswith('+++'):
+            clean_line = line[1:].strip()
+            if not clean_line:
+                continue
+
+            masked_line = mask_sensitive_value(clean_line)
+
+            # 1. Check for secret & credential leaks (checked on entire line including comments/configs)
+            for pattern, desc, score in COMMON_SECRET_PATTERNS:
+                if re.search(pattern, clean_line):
+                    findings.append({
+                        "severity": "CRITICAL",
+                        "type": desc,
+                        "score": score,
+                        "confidence": "99%",
+                        "file": current_file.lstrip("b/"),
+                        "snippet": masked_line[:80]
+                    })
+
+            # 2. Check for malware, webshell, and reverse shell patterns
+            matched_malware = False
+            for pattern, desc, score in MALWARE_PATTERNS:
+                if re.search(pattern, clean_line):
+                    matched_malware = True
+                    findings.append({
+                        "severity": "CRITICAL",
+                        "type": desc,
+                        "score": score,
+                        "confidence": "99%",
+                        "file": current_file.lstrip("b/"),
+                        "snippet": masked_line[:80]
+                    })
+
+            # 3. Check for language-specific dangerous APIs
+            # Skip if malware matched or line is a comment to prevent false positives
+            if not matched_malware and not is_comment_line(clean_line):
+                code_part = strip_inline_comment(clean_line).strip()
+                if code_part:
+                    for pattern, desc, score in LANGUAGE_VULN_PATTERNS:
+                        if re.search(pattern, code_part):
+                            findings.append({
+                                "severity": "HIGH",
+                                "type": desc,
+                                "score": score,
+                                "confidence": "95%",
+                                "file": current_file.lstrip("b/"),
+                                "snippet": masked_line[:80]
+                            })
+
+    return findings
+
+
+def scan_local_path_offline(target_path: str, custom_ignore_paths: Optional[List[str]] = None) -> Tuple[List[Dict[str, Any]], int]:
+    """Scan a local file or recursively walk a directory without requiring git or network connectivity."""
+    findings: List[Dict[str, Any]] = []
+    lines_scanned = 0
+    target = pathlib.Path(target_path).resolve()
+
+    if not target.exists():
+        print(f"Error: Specified path '{target_path}' does not exist.", file=sys.stderr)
+        return findings, lines_scanned
+
+    files_to_scan: List[pathlib.Path] = []
+    if target.is_file():
+        files_to_scan.append(target)
+    else:
+        for root, dirs, files in os.walk(target):
+            # Prune ignored directories in-place to optimize traversal
+            dirs[:] = [d for d in dirs if d not in IGNORE_DIR_NAMES and not is_ignored_file(d, custom_ignore_paths)]
+            for file in files:
+                file_path = pathlib.Path(root) / file
+                files_to_scan.append(file_path)
+
+    reported_binaries = set()
+
+    for file_path in files_to_scan:
+        try:
+            rel_str = str(file_path.relative_to(target.parent if target.is_file() else target)).replace("\\", "/")
+        except ValueError:
+            rel_str = file_path.name
+
+        if is_ignored_file(rel_str, custom_ignore_paths):
+            continue
+
+        # Flag suspicious binary or executable artifacts
+        if any(file_path.name.lower().endswith(ext) for ext in SUSPICIOUS_EXECUTABLE_EXTS):
+            if rel_str not in reported_binaries:
+                reported_binaries.add(rel_str)
+                findings.append({
+                    "severity": "CRITICAL",
+                    "type": "Suspicious Executable Binary / Script Added",
+                    "score": "9.5",
+                    "confidence": "95%",
+                    "file": rel_str,
+                    "snippet": f"Executable artifact detected: {file_path.name}"
+                })
+            continue
+
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+        except Exception:
+            continue
+
+        for line_num, line in enumerate(lines, 1):
+            lines_scanned += 1
+            clean_line = line.strip()
+            if not clean_line:
+                continue
+
+            masked_line = mask_sensitive_value(clean_line)
+
+            # 1. Check secrets (on full line)
+            for pattern, desc, score in COMMON_SECRET_PATTERNS:
+                if re.search(pattern, clean_line):
+                    findings.append({
+                        "severity": "CRITICAL",
+                        "type": desc,
+                        "score": score,
+                        "confidence": "99%",
+                        "file": f"{rel_str}:{line_num}",
+                        "snippet": masked_line[:80]
+                    })
+
+            # 2. Check malware & webshells
+            matched_malware = False
+            for pattern, desc, score in MALWARE_PATTERNS:
+                if re.search(pattern, clean_line):
+                    matched_malware = True
+                    findings.append({
+                        "severity": "CRITICAL",
+                        "type": desc,
+                        "score": score,
+                        "confidence": "99%",
+                        "file": f"{rel_str}:{line_num}",
+                        "snippet": masked_line[:80]
+                    })
+
+            # 3. Check language vulnerabilities (ignore full-line comments and strip inline comments)
+            if not matched_malware and not is_comment_line(clean_line):
+                code_part = strip_inline_comment(clean_line).strip()
+                if code_part:
+                    for pattern, desc, score in LANGUAGE_VULN_PATTERNS:
+                        if re.search(pattern, code_part):
+                            findings.append({
+                                "severity": "HIGH",
+                                "type": desc,
+                                "score": score,
+                                "confidence": "95%",
+                                "file": f"{rel_str}:{line_num}",
+                                "snippet": masked_line[:80]
+                            })
+
+    return findings, lines_scanned
+
+
+def chunk_diff_smart(diff_text: str, max_chars: int = 12000) -> str:
+    """Prioritize high-risk file diffs when diff length exceeds context limits."""
+    if len(diff_text) <= max_chars:
+        return diff_text
+
+    file_diffs = re.split(r'(?=diff --git )', diff_text)
+    prioritized_hunks: List[str] = []
+    other_hunks: List[str] = []
+
+    high_risk_exts = ('.py', '.go', '.rs', '.js', '.ts', '.java', '.php', '.c', '.cpp', '.h', '.hpp', '.rb', '.sh', '.yml', '.yaml')
+
+    for chunk in file_diffs:
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        first_line = chunk.splitlines()[0] if chunk.splitlines() else ""
+        is_high_risk = any(first_line.endswith(ext) or ext in first_line for ext in high_risk_exts)
+        has_suspicious_patterns = any(
+            re.search(p, chunk) for p, _, _ in COMMON_SECRET_PATTERNS + MALWARE_PATTERNS + LANGUAGE_VULN_PATTERNS
+        )
+
+        if is_high_risk or has_suspicious_patterns:
+            prioritized_hunks.append(chunk)
+        else:
+            other_hunks.append(chunk)
+
+    selected: List[str] = []
+    current_length = 0
+
+    for h in prioritized_hunks + other_hunks:
+        if current_length + len(h) <= max_chars:
+            selected.append(h)
+            current_length += len(h)
+        else:
+            remaining = max_chars - current_length
+            if remaining > 200:
+                selected.append(h[:remaining] + "\n... [diff truncated for length]")
+            break
+
+    return "\n\n".join(selected) if selected else diff_text[:max_chars]
+
+
+def count_scanned_lines(diff_text: str) -> int:
+    """Count total added code lines analyzed from diff."""
+    return sum(1 for line in diff_text.splitlines() if line.startswith('+') and not line.startswith('+++'))
+
+
+def parse_simple_yaml(text: str) -> Dict[str, Any]:
+    """Lightweight fallback YAML parser for configuration without external dependencies."""
+    config: Dict[str, Any] = {}
+    current_section: Optional[str] = None
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        if not raw_line.startswith(" ") and line.endswith(":"):
+            current_section = line[:-1].strip()
+            config[current_section] = {}
+            continue
+
+        if current_section and raw_line.startswith("  ") and ":" in line:
+            parts = line.split(":", 1)
+            k = parts[0].strip()
+            v = parts[1].strip().strip('"').strip("'")
+            if isinstance(config[current_section], dict):
+                config[current_section][k] = v
+            continue
+
+        if current_section and line.startswith("- "):
+            item = line[2:].strip().strip('"').strip("'")
+            if not isinstance(config[current_section], list):
+                config[current_section] = []
+            config[current_section].append(item)
+            continue
+
+        if ":" in line:
+            parts = line.split(":", 1)
+            k = parts[0].strip()
+            v = parts[1].strip().strip('"').strip("'")
+            config[k] = v
+            current_section = None
+
+    return config
+
+
+def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """Load configuration from specified path or standard configuration files."""
+    candidate_paths = [config_path] if config_path else [".pr-security.yml", ".pr-security-linter.yml", ".codex-security.yml"]
+    
+    for path in candidate_paths:
+        if path and os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+
+                try:
+                    import yaml  # type: ignore
+                    data = yaml.safe_load(content)
+                    if isinstance(data, dict):
+                        return data
+                except ImportError:
+                    pass
+
+                return parse_simple_yaml(content)
+            except Exception as e:
+                print(f"Warning: Failed to load config from '{path}': {e}", file=sys.stderr)
+                return {}
+
+    return {}
+
+
+def install_pre_commit_hook() -> None:
+    """Scaffold a .pre-commit-config.yaml configured for PR Security Linter."""
+    config_path = ".pre-commit-config.yaml"
+    hook_config = f"""repos:
+  - repo: https://github.com/knmt1219/pr-security-linter
+    rev: v{__version__}
+    hooks:
+      - id: pr-security-linter
+"""
+    if os.path.exists(config_path):
+        print(f"File '{config_path}' already exists. Please verify hook configuration.")
+    else:
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(hook_config)
+        print(f"✅ Generated '{config_path}' configured for PR Security Linter v{__version__}.")
+    print("Next step: Run `pre-commit install` to activate the hook locally.")
+
+
+def set_github_output(name: str, value: Any) -> None:
+    """Write an output parameter to $GITHUB_OUTPUT file in GitHub Actions."""
+    output_file = os.environ.get("GITHUB_OUTPUT")
+    if output_file:
+        try:
+            with open(output_file, "a", encoding="utf-8") as f:
+                f.write(f"{name}={value}\n")
+        except Exception as e:
+            print(f"Warning: Failed to write output to GITHUB_OUTPUT: {e}", file=sys.stderr)
+
+
+def write_github_action_outputs(findings: list, sarif_path: str = "", html_path: str = "") -> None:
+    """Record GitHub Action step outputs for downstream workflow steps."""
+    total_count = len(findings)
+    has_critical = any(f.get("severity") == "CRITICAL" for f in findings)
+    set_github_output("findings-count", str(total_count))
+    set_github_output("has-critical", "true" if has_critical else "false")
+    set_github_output("sarif-path", sarif_path or "")
+    set_github_output("html-report-path", html_path or "")
+
+
+def should_fail_on_severity(findings: list, fail_on_threshold: str) -> bool:
+    """Return True if any finding meets or exceeds the specified fail_on severity threshold."""
+    if not fail_on_threshold or not findings:
+        return False
+
+    threshold_rank = SEVERITY_RANKS.get(fail_on_threshold.upper(), 3)
+    for f in findings:
+        sev = f.get("severity", "LOW").upper()
+        if SEVERITY_RANKS.get(sev, 1) >= threshold_rank:
+            return True
+    return False
+
+
+def get_pr_diff(repo_full_name: str, pr_number: int, github_token: str) -> str:
+    """Fetch pull request diff from GitHub API."""
+    url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}"
+    headers = {"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github.v3.diff"}
+    res = requests.get(url, headers=headers, timeout=30)
+    return res.text if res.status_code == 200 else ""
+
+
+def post_comment(repo_full_name: str, pr_number: int, github_token: str, body: str) -> bool:
+    """Post comment to PR on GitHub."""
+    url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
+    headers = {"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github.v3+json"}
+    res = requests.post(url, headers=headers, json={"body": body}, timeout=30)
+    return res.status_code == 201
+
+
+def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-mini") -> str:
+    """Optional LLM-based triage to review code diff and suggest remediation patches."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return "*(OpenAI SDK not installed. Run `pip install openai` to enable optional AI remediation suggestions)*"
+
+    optimized_diff = chunk_diff_smart(diff_text, max_chars=12000)
+    client = OpenAI(api_key=api_key)
+    prompt = (
+        "You are an application security reviewer auditing an open-source Pull Request.\n"
+        "Analyze the following code diff and provide a concise review:\n"
+        "1. [SEVERITY: CRITICAL/HIGH/MEDIUM/LOW] (Include estimated confidence % and CVSS score).\n"
+        "2. Concrete remediation code patches formatted as GitHub suggestions (```suggestion ... ```) when applicable.\n"
+        "3. Best practice recommendation.\n"
+        "If no vulnerabilities are detected, state: 'No security vulnerabilities detected.'\n\n"
+        f"Diff:\n```diff\n{optimized_diff}\n```"
+    )
+    res = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": "You are a concise security code reviewer for pull requests."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.1,
+    )
+    return res.choices[0].message.content or ""
+
+
+def main() -> None:
+    """CLI and GitHub Action entry point."""
+    if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+    start_time = time.time()
+    parser = argparse.ArgumentParser(description=f"PR Security Linter CLI & GitHub Action (v{__version__})")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--local", action="store_true", help="Run security audit on local git diff")
+    parser.add_argument("--staged", action="store_true", help="Run security audit on staged git changes (git diff --cached)")
+    parser.add_argument("--path", type=str, help="Scan a local file or recursive directory offline without git dependency")
+    parser.add_argument("--sarif", type=str, help="Export scan results to OASIS SARIF format")
+    parser.add_argument("--json", type=str, help="Export scan results to JSON format")
+    parser.add_argument("--html", type=str, help="Export interactive HTML security dashboard report")
+    parser.add_argument("--badge", action="store_true", help="Generate SVG status badge (security-badge.svg)")
+    parser.add_argument("--strict", action="store_true", help="Fail with exit code 1 if critical or high risks are found")
+    parser.add_argument("--quiet", action="store_true", help="Quiet mode: suppress info logs and only output when issues are found")
+    parser.add_argument("--config", type=str, help="Path to custom YAML configuration file (default: .pr-security.yml)")
+    parser.add_argument("--install-hook", action="store_true", help="Scaffold a .pre-commit-config.yaml for PR Security Linter")
+    parser.add_argument(
+        "--fail-on",
+        type=str,
+        choices=["CRITICAL", "HIGH", "MEDIUM", "LOW", "critical", "high", "medium", "low"],
+        help="Exit with code 1 if findings meet or exceed the specified severity threshold",
+    )
+    args = parser.parse_args()
+
+    if args.install_hook:
+        install_pre_commit_hook()
+        return
+
+    # Load configuration
+    config = load_config(args.config)
+    settings = config.get("settings", {}) if isinstance(config.get("settings"), dict) else {}
+    ignore_paths = config.get("ignore_paths", []) if isinstance(config.get("ignore_paths"), list) else []
+
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    model_name = os.environ.get("MODEL_NAME") or settings.get("model") or "gpt-4o-mini"
+
+    fail_threshold = None
+    if args.fail_on:
+        fail_threshold = args.fail_on.upper()
+    elif args.strict:
+        fail_threshold = "HIGH"
+    elif settings.get("severity_threshold"):
+        fail_threshold = str(settings.get("severity_threshold")).upper()
+
+    # 1. Offline path scanning mode
+    if args.path:
+        if not args.quiet:
+            print(f"🔍 Running Offline Security Audit on '{args.path}' (v{__version__})...")
+        findings, lines_scanned = scan_local_path_offline(args.path, ignore_paths)
+        duration_ms = (time.time() - start_time) * 1000
+
+        if args.badge:
+            generate_svg_badge(bool(findings))
+            if not args.quiet:
+                print("SVG security badge generated at: security-badge.svg")
+
+        if findings:
+            print("\n📊 Security Summary Matrix:")
+            print(build_markdown_summary_table(findings, lines_scanned, duration_ms))
+            if args.sarif:
+                export_sarif(findings, args.sarif)
+                if not args.quiet:
+                    print(f"SARIF report exported to: {args.sarif}")
+            if args.json:
+                export_json(findings, args.json)
+                if not args.quiet:
+                    print(f"JSON report exported to: {args.json}")
+            if args.html:
+                export_html(findings, args.html, lines_scanned, duration_ms)
+                if not args.quiet:
+                    print(f"Interactive HTML report exported to: {args.html}")
+
+            if fail_threshold and should_fail_on_severity(findings, fail_threshold):
+                print(f"\n❌ Threshold violation: Vulnerabilities matching or exceeding '{fail_threshold}' detected. Exiting with error.")
+                sys.exit(1)
+        else:
+            if not args.quiet:
+                print(f"✅ Offline Scan: Clean (Scanned {lines_scanned} lines in {duration_ms:.2f}ms)")
+            if args.html:
+                export_html(findings, args.html, lines_scanned, duration_ms)
+        return
+
+    # 2. Local git diff / staged mode
+    if args.local or args.staged:
+        if args.staged:
+            diff_text = os.popen("git diff --cached").read()
+        else:
+            diff_text = os.popen("git diff HEAD~1").read()
+            if not diff_text.strip():
+                diff_text = os.popen("git diff").read()
+
+        if not diff_text.strip():
+            if not args.quiet:
+                print("No local git changes detected to audit.")
+            return
+
+        lines_scanned = count_scanned_lines(diff_text)
+        if not args.quiet:
+            print(f"🔍 Running Security Audit on Git Diff (v{__version__})...")
+        findings = heuristic_scan_structured(diff_text, ignore_paths)
+        duration_ms = (time.time() - start_time) * 1000
+
+        if args.badge:
+            generate_svg_badge(bool(findings))
+            if not args.quiet:
+                print("SVG security badge generated at: security-badge.svg")
+
+        if findings:
+            print("\n📊 Security Summary Matrix:")
+            print(build_markdown_summary_table(findings, lines_scanned, duration_ms))
+            if args.sarif:
+                export_sarif(findings, args.sarif)
+                if not args.quiet:
+                    print(f"SARIF report exported to: {args.sarif}")
+            if args.json:
+                export_json(findings, args.json)
+                if not args.quiet:
+                    print(f"JSON report exported to: {args.json}")
+            if args.html:
+                export_html(findings, args.html, lines_scanned, duration_ms)
+                if not args.quiet:
+                    print(f"Interactive HTML report exported to: {args.html}")
+
+            if fail_threshold and should_fail_on_severity(findings, fail_threshold):
+                print(f"\n❌ Threshold violation: Vulnerabilities matching or exceeding '{fail_threshold}' detected. Exiting with error.")
+                sys.exit(1)
+        else:
+            if not args.quiet:
+                print(f"✅ Heuristic Scan: Clean (Scanned {lines_scanned} lines in {duration_ms:.2f}ms)")
+            if args.html:
+                export_html(findings, args.html, lines_scanned, duration_ms)
+
+        if api_key:
+            if not args.quiet:
+                print("\n🤖 Running Optional AI Review...")
+            ai_report = audit_diff_with_ai(diff_text, api_key, model_name)
+            print("\n" + ai_report)
+        return
+
+    # 3. GitHub Action Mode
+    token = os.environ.get("GITHUB_TOKEN")
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not (token and event_path):
+        print("PR Security Linter: No target path, local flag, or GitHub Action event detected. Run with --help for usage.")
+        return
+
+    try:
+        with open(event_path, "r", encoding="utf-8") as f:
+            event_data = json.load(f)
+    except Exception as e:
+        print(f"Error loading GitHub event payload: {e}")
+        return
+
+    pr_data = event_data.get("pull_request")
+    if not pr_data:
+        print("Not a pull request event.")
+        return
+
+    repo_full_name = event_data["repository"]["full_name"]
+    pr_number = pr_data["number"]
+    diff_text = get_pr_diff(repo_full_name, pr_number, token)
+
+    if not diff_text.strip():
+        print("Empty or inaccessible diff.")
+        generate_svg_badge(False)
+        write_github_action_outputs([], args.sarif or "", args.html or "")
+        return
+
+    lines_scanned = count_scanned_lines(diff_text)
+    findings = heuristic_scan_structured(diff_text, ignore_paths)
+    duration_ms = (time.time() - start_time) * 1000
+
+    generate_svg_badge(bool(findings))
+
+    summary_table = build_markdown_summary_table(findings, lines_scanned, duration_ms)
+    report_sections = [f"#### 📊 Security Summary\n{summary_table}"]
+
+    if args.sarif:
+        export_sarif(findings, args.sarif)
+    if args.json:
+        export_json(findings, args.json)
+    if args.html:
+        export_html(findings, args.html, lines_scanned, duration_ms)
+
+    write_github_action_outputs(findings, args.sarif or "", args.html or "")
+
+    if api_key:
+        try:
+            ai_report = audit_diff_with_ai(diff_text, api_key, model_name)
+            report_sections.append("#### 🤖 AI Review & Suggested Fixes\n" + ai_report)
+        except Exception as e:
+            report_sections.append(f"*(AI review unavailable: {e})*")
+
+    badge_img = (
+        "https://img.shields.io/badge/PR%20Security-ISSUES%20FOUND-red"
+        if findings
+        else "https://img.shields.io/badge/PR%20Security-PASSED-brightgreen"
+    )
+
+    final_comment = (
+        f"![Security Status]({badge_img})\n\n"
+        f"### 🛡️ PR Security Linter Report (v{__version__})\n\n"
+        + "\n\n".join(report_sections)
+        + f"\n\n---\n*Automated audit by [pr-security-linter](https://github.com/knmt1219/pr-security-linter)*"
+    )
+
+    post_comment(repo_full_name, pr_number, token, final_comment)
+    print(f"Security audit posted to PR #{pr_number} ({lines_scanned} lines scanned in {duration_ms:.2f}ms).")
+
+    if fail_threshold and should_fail_on_severity(findings, fail_threshold):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

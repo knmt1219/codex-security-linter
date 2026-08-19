@@ -1,18 +1,19 @@
-name: 'Codex Security Linter'
-description: 'Automated AI-powered security linter & vulnerability auditor for Pull Requests.'
+name: 'PR Security Linter'
+description: 'Fast, lightweight security & secret linter for Pull Requests and Git repositories.'
 branding:
   icon: 'shield'
-  color: 'purple'
+  color: 'blue'
 
 inputs:
   github-token:
     description: 'GitHub Token for authentication'
     required: true
   openai-api-key:
-    description: 'OpenAI API Key for security analysis'
-    required: true
+    description: 'Optional OpenAI API Key for AI-assisted code review'
+    required: false
+    default: ''
   model:
-    description: 'Model to use for auditing'
+    description: 'Model to use for optional AI triage'
     required: false
     default: 'gpt-4o-mini'
   fail-on:
@@ -25,6 +26,10 @@ inputs:
     default: ''
   html:
     description: 'Path to export interactive HTML dashboard'
+    required: false
+    default: ''
+  config:
+    description: 'Path to custom YAML configuration file'
     required: false
     default: ''
 
@@ -65,9 +70,11 @@ runs:
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_SARIF: ${{ inputs.sarif }}
         INPUT_HTML: ${{ inputs.html }}
+        INPUT_CONFIG: ${{ inputs.config }}
       run: |
         EXTRA_ARGS=""
         if [ -n "$INPUT_FAIL_ON" ]; then EXTRA_ARGS="$EXTRA_ARGS --fail-on $INPUT_FAIL_ON"; fi
         if [ -n "$INPUT_SARIF" ]; then EXTRA_ARGS="$EXTRA_ARGS --sarif $INPUT_SARIF"; fi
         if [ -n "$INPUT_HTML" ]; then EXTRA_ARGS="$EXTRA_ARGS --html $INPUT_HTML"; fi
+        if [ -n "$INPUT_CONFIG" ]; then EXTRA_ARGS="$EXTRA_ARGS --config $INPUT_CONFIG"; fi
         python ${{ github.action_path }}/scanner.py $EXTRA_ARGS

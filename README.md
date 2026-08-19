@@ -1,334 +1,100 @@
-# Codex Security Linter 🛡️
+# PR Security Linter 🛡️
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://img.shields.io/badge/Release-v2.8.0-blue.svg)](https://github.com/knmt1219/codex-security-linter/releases)
+[![Release](https://img.shields.io/badge/Release-v0.9.0-blue.svg)](https://github.com/knmt1219/pr-security-linter/releases)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/)
-[![GitHub Action](https://img.shields.io/badge/GitHub%20Action-Security%20Linter-purple.svg)](https://github.com/marketplace)
-[![Languages](https://img.shields.io/badge/Languages-Python%20%7C%20JS%2FTS%20%7C%20React%20%7C%20Go%20%7C%20Rust%20%7C%20Java%20%7C%20PHP%20%7C%20C%2FC%2B%2B-orange.svg)](https://github.com/knmt1219/codex-security-linter)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-lightgrey.svg)](https://github.com/knmt1219/codex-security-linter)
+[![GitHub Action](https://img.shields.io/badge/GitHub%20Action-PR%20Security%20Linter-purple.svg)](https://github.com/marketplace)
 
-**Codex Security Linter** is an open-source, enterprise-grade AI security auditing and linting engine. It operates seamlessly as a **GitHub Action**, **Pre-commit Hook**, **Docker Container**, and **Cross-Platform CLI Tool** to detect secret leaks, injection flaws, webshells, malware payloads, and security vulnerabilities across code diffs or offline directories in **Python**, **JavaScript/TypeScript**, **React**, **Go**, **Rust**, **Java**, **PHP**, and **C/C++** with automated remediation suggestions, CVSS 3.1 scoring, confidence estimation, execution performance metrics, smart diff chunking, dark-mode interactive HTML dashboards with real-time severity filters, direct status badge embedding in PR comments, and SARIF/JSON reporting.
+> **Note:** Formerly known as `codex-security-linter`. Renamed to avoid any confusion with OpenAI’s official Codex Security product.
 
----
-
-## 🏗️ Architecture Overview
-
-```mermaid
-graph LR
-    A[Git Diff / Staged / Local Path / PR] --> B[codex-security-linter Engine v2.8.0]
-    B --> C{Smart Filter & Ignore Engine}
-    C -->|Ignored Assets| D[Skip *.min.js, dist/*, build/*, vendor/*, .venv, node_modules]
-    C -->|Secrets / Credentials| E[Mask Sensitive Values & CVSS 3.1 Impact Scoring]
-    C -->|Malware & Webshells| F[Detect Obfuscated Webshells, Reverse Shells, Droppers & Binaries]
-    C -->|Multi-Language Code| G[Python, JS/TS, React, Go, Rust, Java, PHP, C/C++ Rules]
-    E & F & G --> H{Multi-Format Reporting Engine}
-    H --> I[📊 PR Markdown Summary Table with Live Status Badge]
-    H --> J[🌐 Dark Mode Interactive HTML Dashboard with Filter Buttons]
-    H --> K[📄 OASIS SARIF 2.1.0 & JSON]
-    H --> L[🖼️ SVG Vector Security Badges]
-    H --> M[📤 GitHub Action Output Parameters]
-```
+**PR Security Linter** is a fast, lightweight security and secret scanner designed for **Pull Requests**, **Git pre-commit hooks**, and **local repositories**. It acts as a quick **first line of defense** to catch hardcoded credentials, suspicious malware/webshell patterns, and dangerous API usages before code gets merged.
 
 ---
 
-## ✨ Key Features
+## 🎯 What PR Security Linter Is (and Isn't)
 
-- 📁 **Zero-Leak Offline Local Scanner (`--path`)**: Audit any standalone file or recursively scan an entire project directory (`python scanner.py --path ./src`) without git diff or external network dependencies.
-- 🦠 **Malware, Webshell & Reverse Shell Detection**:
-  - **Obfuscated Webshells**: Identifies stealthy PHP evasion scripts (`eval(base64_decode(...))`, `assert(gzinflate(...))`, `str_rot13`).
-  - **Interactive Reverse Shells**: Detects bash/TCP reverse shells (`/dev/tcp/x.x.x.x/port`, `bash -i >& /dev/tcp`), and netcat backdoors (`nc -e /bin/sh`).
-  - **Piped Remote Execution**: Flags malicious download & execute droppers (`curl | bash`, `wget | sh`).
-  - **Encoded PowerShell Droppers**: Spots obfuscated base64 encoded commands (`powershell -enc ...`).
-  - **Suspicious Binary & Script Artifacts**: Flags dangerous compiled binaries and executable scripts (`.exe`, `.dll`, `.so`, `.elf`, `.vbs`, `.bat`, `.cmd`, `.scr`) introduced in diffs.
-- 📊 **Executive Security Summary Table**: Formats all audit findings into a high-visibility Markdown matrix table (Severity badge, Type, CVSS, Confidence %, Code snippet).
-- 🏷️ **Direct PR Comment Status Badges**: Automatically embeds real-time visual status badges (`Codex Audit: PASSED` / `Codex Audit: ISSUES FOUND`) at the top of Pull Request comments.
-- 🌐 **Dark Mode Interactive HTML Dashboard (`--html`)**: Generates a sleek, modern, standalone HTML5/CSS security report with real-time severity filter buttons (All, Critical, High) and interactive search.
-- 🦀 **Comprehensive Multi-Language Vulnerability Scanning**:
-  - **Python**: Dynamic execution (`eval`, `exec`), command injection (`subprocess shell=True`), insecure deserialization (`pickle.loads`).
-  - **JavaScript / TypeScript / React**: Cross-site scripting (`dangerouslySetInnerHTML`).
-  - **Go**: SQL injection risks via `fmt.Sprintf` query construction, dangerous memory manipulation (`unsafe.Pointer`).
-  - **Rust**: Memory safety violations and unconstrained `unsafe` code blocks.
-  - **Java**: Dangerous command execution (`Runtime.getRuntime().exec`, `ProcessBuilder`), insecure deserialization (`XMLDecoder`), SQL injection via string concatenation (`executeQuery`, `executeUpdate`).
-  - **PHP**: Remote command execution (`system`, `shell_exec`, `passthru`, `proc_open`), object deserialization vulnerabilities (`unserialize`).
-  - **C / C++**: Buffer overflow vulnerabilities (`gets`, `strcpy`, `strcat`), dangerous format string risks (`sprintf`).
-- ⚡ **Smart Diff Chunking Optimizer**: Intelligently parses and prioritizes security-critical diff hunks for large PRs to maximize LLM context efficiency.
-- ⏱️ **Real-Time Performance Metrics**: Displays detailed scan statistics (lines analyzed, execution duration in milliseconds, issue counts).
-- 🎯 **Staged Changes Scanning (`--staged`)**: Audit git staged index changes (`git diff --cached`) before committing to the repository.
-- 🧹 **Smart Minified & Bundled File Filtering**: Automatically ignores compiled/bundled artifacts (`*.min.js`, `*.bundle.js`, `dist/*`, `build/*`, `vendor/*`, `*.lock`, `node_modules`, `.venv`) to eliminate false positives.
-- 🖼️ **Automated SVG Security Badges (`security-badge.svg`)**: Automatically generated in GitHub Actions and available on CLI (`--badge`) for embedding in READMEs and CI dashboards.
-- 🐳 **Docker Container Support**: Pre-packaged ultra-lightweight Docker image (`python:3.11-slim`) for seamless containerized execution in any CI/CD environment.
-- ⚙️ **Custom Configuration Path (`--config`)**: Flexible policy customization via `.codex-security.yml` or custom file paths.
-- 📤 **GitHub Action Output Parameters**: Emits `findings-count`, `has-critical`, `sarif-path`, and `html-report-path` to `$GITHUB_OUTPUT` for downstream CI/CD workflow automation.
-- 🤫 **Quiet Mode (`--quiet`)**: Silent CLI execution mode for clean pre-commit hooks that only produces output when security flaws are detected.
-- 🛑 **Configurable Fail-On Threshold (`--fail-on`)**: Automatically fails the CI build (`exit code 1`) if vulnerabilities meet or exceed your specified threshold (`CRITICAL`, `HIGH`, `MEDIUM`, or `LOW`).
-- 🔑 **Secret & Token Leak Detection with Masking**: Catches hardcoded API keys, private certificates, and tokens with rapid regex heuristics, automatically masking sensitive values (`AKIA...12`).
-- 🎯 **CVSS 3.1 Impact Scoring & Confidence Matrix**: Assigns standard CVSS severity scores and confidence percentages to all detected security findings.
-- 📄 **Multi-Format Export Support**: Exports findings to industry-standard **SARIF** (`--sarif`), structured **JSON** (`--json`), and interactive **HTML** (`--html`).
-- 💡 **One-Click GitHub Suggestions**: Generates secure code replacements formatted as GitHub suggestions (````suggestion ... ````) directly in PR comments.
-- 🪝 **Pre-commit Hook Integration**: Prevents insecure commits locally before they reach the repository.
-- ⚡ **Cross-Platform**: Full native support for **Windows (PowerShell/CMD)**, **macOS (zsh/bash)**, **Linux (Ubuntu/Debian/Arch)**, and **Docker**.
+- ✅ **A Fast First-Line Filter:** Runs in milliseconds locally or on CI without requiring heavy infrastructure or cloud dependencies.
+- ✅ **Offline-First:** Audits local diffs or directory trees completely offline without sending code over the network.
+- ✅ **Multi-Format Reporting:** Generates clean Markdown summary tables, interactive HTML dashboards, SARIF 2.1.0 for GitHub Security tab integration, JSON, and SVG status badges.
+- ℹ️ **Optional AI Triage:** Can optionally invoke OpenAI models to summarize diffs and suggest GitHub code replacements if an API key is provided.
+- ❌ **Not a Deep SAST:** This tool uses heuristic pattern matching and is **not** a full AST-based data-flow analyzer. It does **not** replace mature deep SAST tools like **Semgrep**, **CodeQL**, or **SonarQube**.
 
 ---
 
-## 💻 Cross-Platform Installation & Local CLI Usage
+## 🔍 Supported Checks & Heuristics
 
-### 🪟 1. Windows (PowerShell & CMD)
+| Category | Checks & Targets | Description |
+| :--- | :--- | :--- |
+| **Secrets & Keys** | AWS, GitHub tokens, Private keys, API keys, Passwords | Detects common plaintext secret assignments and masks values in reports (`AKIA...LE12`). |
+| **Malware & Webshells** | Obfuscated PHP payloads, Reverse shells, Piped shells, Encoded PowerShell | Catches dangerous signatures like `eval(base64_decode(...))`, `/dev/tcp` shells, `nc -e`, `curl \| bash`, and suspicious executables (`.exe`, `.dll`, `.so`). |
+| **Python** | `eval()`, `exec()`, `subprocess(shell=True)`, `pickle.loads()` | Flags arbitrary code execution and command injection risks. |
+| **JavaScript / TypeScript** | `dangerouslySetInnerHTML` | Warns about unescaped React/DOM cross-site scripting (XSS) vectors. |
+| **Go** | `fmt.Sprintf` in SQL queries, `unsafe.Pointer` | Flags string concatenation in SQL queries and unconstrained memory operations. |
+| **Rust** | `unsafe { ... }` blocks | Highlights memory safety boundary escapes in Rust code. |
+| **Java** | `Runtime.exec`, `ProcessBuilder`, `XMLDecoder`, Concatenated SQL | Flags command execution, insecure deserialization, and SQL concatenation. |
+| **PHP** | `system()`, `shell_exec()`, `passthru()`, `unserialize()` | Catches OS command execution and object injection risks. |
+| **C / C++** | `gets()`, `strcpy()`, `strcat()`, unbounded `sprintf()` | Flags legacy unsafe functions prone to buffer overflows. |
 
-#### Prerequisites
-- Python 3.10+ installed (ensure **"Add Python to PATH"** is checked during installation)
-- Git installed
+> **Smart Comment Filtering:** Language vulnerability patterns automatically ignore code comments (`#`, `//`, `/* */`, `--`) and strip inline comments to minimize false positives.
 
-#### Step 1: Clone Repository & Set Up Virtual Environment
-**PowerShell:**
-```powershell
-# Clone repository
-git clone https://github.com/knmt1219/codex-security-linter.git
-cd codex-security-linter
+---
 
-# Create and activate virtual environment
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+## 📦 Installation & Setup
 
-# Install package
+### 1. Python Package (`pip`)
+
+```bash
+# Install from local clone or source
 pip install -e .
+
+# With optional AI triage support
+pip install -e .[ai]
 ```
 
-**Command Prompt (CMD):**
-```cmd
-REM Clone repository
-git clone https://github.com/knmt1219/codex-security-linter.git
-cd codex-security-linter
+### 2. Pre-commit Hook
 
-REM Create and activate virtual environment
-python -m venv .venv
-.venv\Scripts\activate.bat
-
-REM Install package
-pip install -e .
-```
-
-#### Step 2: Configure OpenAI API Key (Optional for Deep AI Analysis)
-**PowerShell:**
-```powershell
-$env:OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-```
-
-**Command Prompt (CMD):**
-```cmd
-set OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-#### Step 3: Run Security Audits
-```powershell
-# Scan an entire directory or single file offline (No git required)
-codex-security-linter --path ./src
-
-# Scan local uncommitted git changes
-codex-security-linter --local
-
-# Scan staged changes before committing
-codex-security-linter --staged
-
-# Export dark-mode interactive HTML dashboard report and SARIF/JSON
-codex-security-linter --path ./src --html security-report.html --json findings.json --sarif results.sarif
-
-# Stop process (exit code 1) on CRITICAL vulnerabilities
-codex-security-linter --path ./src --fail-on CRITICAL
-
-# Scaffold pre-commit configuration file
-codex-security-linter --install-hook
-
-# Generate SVG status badge
-codex-security-linter --local --badge
-```
-
----
-
-### 🍎 2. macOS (Terminal / zsh / bash)
-
-#### Prerequisites
-- Python 3.10+ (`brew install python` via Homebrew)
-- Git installed (`xcode-select --install` or `brew install git`)
-
-#### Step 1: Clone Repository & Set Up Virtual Environment
-```bash
-# Clone repository
-git clone https://github.com/knmt1219/codex-security-linter.git
-cd codex-security-linter
-
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install package
-pip install -e .
-```
-
-#### Step 2: Configure OpenAI API Key (Optional)
-```bash
-# Set for current session
-export OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-```
-
-#### Step 3: Run Security Audits
-```bash
-# Scan a directory offline
-python scanner.py --path ./src
-
-# Run heuristic & AI audit on local git diff
-codex-security-linter --local
-
-# Audit staged changes quietly
-codex-security-linter --staged --quiet
-
-# Generate dark-mode interactive HTML dashboard and SVG badge
-codex-security-linter --path ./src --html security-report.html --badge
-
-# Enforce fail-on threshold in CI
-codex-security-linter --path ./src --fail-on HIGH
-```
-
----
-
-### 🐧 3. Linux (Ubuntu / Debian / Arch / Fedora)
-
-#### Prerequisites
-```bash
-# Ubuntu / Debian
-sudo apt update && sudo apt install -y python3 python3-pip python3-venv git
-
-# Arch Linux
-sudo pacman -S python python-pip git
-
-# Fedora / RHEL
-sudo dnf install -y python3 python3-pip git
-```
-
-#### Step 1: Clone Repository & Set Up Virtual Environment
-```bash
-# Clone repository
-git clone https://github.com/knmt1219/codex-security-linter.git
-cd codex-security-linter
-
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install package
-pip install -e .
-```
-
-#### Step 2: Run Security Audits
-```bash
-# Offline scan on local folder
-python scanner.py --path ./src
-
-# Scan local git diff
-codex-security-linter --local
-
-# Scan staged changes quietly
-codex-security-linter --staged --quiet
-
-# Export complete multi-format reports including dark-mode HTML dashboard
-codex-security-linter --path ./src --html security-report.html --json findings.json --sarif results.sarif --badge
-
-# Fail build if any CRITICAL or HIGH vulnerabilities are detected
-codex-security-linter --path ./src --fail-on HIGH
-```
-
----
-
-### 🐳 4. Docker Container Usage
-
-Run Codex Security Linter inside an isolated Docker container without installing Python locally:
-
-#### Build Docker Image
-```bash
-# Build lightweight Docker container image
-docker build -t codex-security-linter:v2.8.0 .
-```
-
-#### Run Security Audit via Docker
-```bash
-# Audit current repository mounted into container
-docker run --rm \
-  -v "$(pwd):/app/repo" \
-  -w /app/repo \
-  -e OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx" \
-  codex-security-linter:v2.8.0 --path ./repo --html security-report.html --fail-on HIGH
-```
-
----
-
-## 🎛️ CLI Options & Flags Reference
-
-| Option / Flag | Type | Description |
-| :--- | :---: | :--- |
-| `--path <path>` | String | Scan a local file or recursive directory offline without git diff dependency. |
-| `--local` | Flag | Run security audit on local uncommitted `git diff`. |
-| `--staged` | Flag | Run security audit on staged changes (`git diff --cached`). |
-| `--config <path>` | String | Path to custom YAML configuration file (default: `.codex-security.yml`). |
-| `--install-hook` | Flag | Automatically scaffold a `.pre-commit-config.yaml` file in the current directory. |
-| `--quiet` | Flag | Quiet mode: suppress informational logs and only output when vulnerabilities/secrets are found. |
-| `--html <path>` | String | Export interactive Dark Mode HTML5 security dashboard report (e.g., `--html security-report.html`). |
-| `--fail-on <level>` | Choice | Exit with code `1` if findings meet or exceed severity (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`). |
-| `--strict` | Flag | Shorthand for `--fail-on HIGH` (exits with code `1` on `CRITICAL` or `HIGH` risks). |
-| `--badge` | Flag | Explicitly generate a vector SVG status badge (`security-badge.svg`) on CLI. |
-| `--json <path>` | String | Export structured scan results to a JSON file (e.g., `--json findings.json`). |
-| `--sarif <path>` | String | Export scan results to OASIS SARIF 2.1.0 format (e.g., `--sarif results.sarif`). |
-
----
-
-## 📤 GitHub Action Outputs Reference
-
-| Output Variable | Type | Description |
-| :--- | :---: | :--- |
-| `findings-count` | Number | Total count of security flaws, malware, and secret leaks detected. |
-| `has-critical` | Boolean | `true` if any `CRITICAL` vulnerability was detected; `false` otherwise. |
-| `sarif-path` | String | Path to the generated SARIF report file. |
-| `html-report-path` | String | Path to the generated interactive HTML report file. |
-
----
-
-## 🪝 Pre-commit Hook Integration
-
-Prevent insecure code, webshells, and hardcoded secrets from ever being committed:
-
-### Method 1: Auto-generate `.pre-commit-config.yaml`
-```bash
-codex-security-linter --install-hook
-```
-
-### Method 2: Manual Configuration
-Add Codex Security Linter to your `.pre-commit-config.yaml`:
+Add PR Security Linter to your `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
-  - repo: https://github.com/knmt1219/codex-security-linter
-    rev: v2.8.0
+  - repo: https://github.com/knmt1219/pr-security-linter
+    rev: v0.9.0
     hooks:
-      - id: codex-security-linter
+      - id: pr-security-linter
 ```
 
-Then install the pre-commit hook:
+Or scaffold the configuration automatically:
 ```bash
-pip install pre-commit
-pre-commit install
+pr-security-linter --install-hook
 ```
 
 ---
 
-## 🚀 GitHub Action Quick Setup
+## 🚀 Usage
 
-Automate security audits on every Pull Request and consume output parameters.
+### Local CLI
 
-### 1. Add Repository Secret
-In your GitHub repository, navigate to **Settings > Secrets and variables > Actions** and add:
-- `OPENAI_API_KEY`: Your OpenAI API key (`sk-...`).
+```bash
+# Scan a directory or single file offline
+pr-security-linter --path ./src
 
-### 2. Create Workflow File
-Create `.github/workflows/security.yml` in your repository:
+# Scan uncommitted changes in current Git repository
+pr-security-linter --local
+
+# Scan staged changes before committing
+pr-security-linter --staged
+
+# Export interactive HTML dashboard and SARIF
+pr-security-linter --path ./src --html report.html --sarif results.sarif
+
+# Enforce fail-on threshold (exit code 1 on HIGH or CRITICAL findings)
+pr-security-linter --path ./src --fail-on HIGH
+```
+
+### GitHub Actions Integration
+
+Create `.github/workflows/security.yml`:
 
 ```yaml
 name: Security Audit
@@ -340,54 +106,74 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  issues: write
 
 jobs:
-  security-audit:
-    name: Codex AI Security Linter
+  security-scan:
+    name: PR Security Linter
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run Codex Security Linter
-        id: security-linter
-        uses: knmt1219/codex-security-linter@v2.8.0
+      - name: Run PR Security Linter
+        uses: knmt1219/pr-security-linter@v0.9.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          model: 'gpt-4o-mini'
           fail-on: 'HIGH'
           html: 'security-report.html'
           sarif: 'results.sarif'
+```
 
-      - name: Upload Security Report Artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-report
-          path: ${{ steps.security-linter.outputs.html-report-path }}
+### Docker Container
 
-      - name: Check Critical Vulnerabilities
-        if: steps.security-linter.outputs.has-critical == 'true'
-        run: echo "🚨 Critical vulnerabilities detected in Pull Request!"
+```bash
+# Build Docker image
+docker build -t pr-security-linter:v0.9.0 .
+
+# Audit repository mounted in container
+docker run --rm -v "$(pwd):/app/repo" -w /app/repo pr-security-linter:v0.9.0 --path . --fail-on HIGH
 ```
 
 ---
 
-## ⚙️ Configuration (`.codex-security.yml`)
+## 🎛️ CLI Reference
 
-Customize scanning behavior by creating a `.codex-security.yml` file in your repository root:
+| Option | Type | Description |
+| :--- | :---: | :--- |
+| `--path <path>` | String | Scan a local file or recursive directory offline without git. |
+| `--local` | Flag | Scan uncommitted changes in local git repository (`git diff`). |
+| `--staged` | Flag | Scan staged git changes (`git diff --cached`). |
+| `--config <path>` | String | Path to custom YAML configuration file (default: `.pr-security.yml`). |
+| `--fail-on <level>` | Choice | Exit code 1 if findings meet or exceed severity (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`). |
+| `--strict` | Flag | Shorthand for `--fail-on HIGH`. |
+| `--html <path>` | String | Export interactive Dark Mode HTML report (e.g. `report.html`). |
+| `--sarif <path>` | String | Export scan results in OASIS SARIF 2.1.0 format. |
+| `--json <path>` | String | Export findings as JSON file. |
+| `--badge` | Flag | Generate SVG status badge (`security-badge.svg`). |
+| `--quiet` | Flag | Suppress informational logs, only printing when issues are detected. |
+| `--install-hook` | Flag | Auto-generate `.pre-commit-config.yaml`. |
+| `--version` | Flag | Show program version and exit. |
+
+---
+
+## ⚙️ Configuration (`.pr-security.yml`)
+
+Create a `.pr-security.yml` file in your repository root:
 
 ```yaml
-version: 2.8
+version: 1.0
+
 settings:
   model: "gpt-4o-mini"
-  severity_threshold: "MEDIUM"
+  severity_threshold: "HIGH"
+
 ignore_paths:
   - "tests/*"
   - "docs/*"
   - "*.lock"
+  - "dist/*"
+  - "build/*"
+
 rules:
   secret_leak_detection: true
   malware_and_webshells: true
@@ -398,16 +184,34 @@ rules:
 
 ---
 
-## 🔒 Security & Privacy
+## 📊 Comparison with Other Security Tools
 
-- **Zero-Leak Offline Capability**: The `--path` scan mode runs 100% locally with zero external network transmission.
-- **Diff-Only Transmission**: In PR/Git mode, only modified code diffs (`git diff`) are audited; entire source trees are never uploaded.
-- **Smart Artifact Filtering**: Automatically excludes minified, bundled, and build assets.
-- **Automatic Secret Masking**: Detected credentials and tokens are masked before being included in reports to prevent secondary exposure.
-- **Enterprise Safe**: Compatible with OpenAI Enterprise data privacy policies.
+| Feature / Capability | **PR Security Linter** | **Gitleaks / Trufflehog** | **Semgrep / CodeQL** |
+| :--- | :---: | :---: | :---: |
+| **Primary Focus** | PR Diff & Fast Linter | Dedicated Secret Detection | Deep Semantic SAST & AST |
+| **Execution Speed** | Sub-second (< 100ms) | Fast | Slower (seconds to minutes) |
+| **Setup Complexity** | Zero-config / Single binary | Minimal | Moderate to High |
+| **Secret Scanning** | Basic Regex Heuristics | Advanced Entropy & Validators | Via Rulesets |
+| **Malware / Webshell Rules** | Built-in Heuristics | No | Custom Rules |
+| **AST / Data Flow Analysis** | No | No | Yes |
+| **Interactive HTML Reports** | Built-in | No (CLI/JSON) | Cloud or SARIF viewers |
+
+---
+
+## ⚠️ Limitations & Honest Disclosures
+
+1. **Regex-Based Detection:** Heuristic checks match text patterns. While comments and common ignore rules are applied, heuristics can miss obfuscated code or flag benign usages.
+2. **Not a Data-Flow Engine:** PR Security Linter does not construct control flow graphs (CFGs) or track tainted variables from sources to sinks.
+3. **Defense in Depth:** We strongly recommend using PR Security Linter alongside dedicated secret management tools and deep semantic SAST analyzers (such as CodeQL or Semgrep).
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please review our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ---
 
 ## 📄 License
 
-This project is open-source and licensed under the [MIT License](LICENSE) (Copyright © 2026 Hồ Minh Tuấn).
+This project is licensed under the [MIT License](LICENSE) (Copyright © 2026 Hồ Minh Tuấn).

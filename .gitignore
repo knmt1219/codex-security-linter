@@ -5,3 +5,10 @@ __pycache__/
 .venv/
 env/
 .pytest_cache/
+*.egg-info/
+dist/
+build/
+*.sarif
+*.html
+findings.json
+security-badge.svg

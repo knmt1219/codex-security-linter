@@ -1,26 +1,26 @@
-# Multi-stage optimized Dockerfile for Codex Security Linter
+# Multi-stage optimized Dockerfile for PR Security Linter
 FROM python:3.11-slim
 
 LABEL maintainer="Hồ Minh Tuấn <minhtuanho120912@gmail.com>"
-LABEL org.opencontainers.image.title="Codex Security Linter"
-LABEL org.opencontainers.image.description="Automated AI-powered security linter & vulnerability auditor for Git repositories and Pull Requests"
-LABEL org.opencontainers.image.version="2.2.0"
+LABEL org.opencontainers.image.title="PR Security Linter"
+LABEL org.opencontainers.image.description="Fast, lightweight security linter & secret scanner for Git pull requests and local repositories"
+LABEL org.opencontainers.image.version="0.9.0"
 LABEL org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app
 
-# Install git for local diff operations
+# Install git for git diff operations
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application source
+# Install Python dependencies and package
+COPY requirements.txt pyproject.toml ./
+COPY pr_security_linter ./pr_security_linter
 COPY scanner.py .
-COPY .codex-security.yml .
+COPY .pr-security.yml .
 
-ENTRYPOINT ["python", "/app/scanner.py"]
+RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir -e .
+
+ENTRYPOINT ["pr-security-linter"]
 CMD ["--local"]
