@@ -6,37 +6,62 @@
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-PR%20Security%20Linter-purple.svg)](https://github.com/marketplace)
 
-> **Note:** Formerly known as `codex-security-linter`. Renamed to avoid any confusion with OpenAI’s official Codex Security product.
+> **Notice:** Formerly known as `codex-security-linter`. Renamed to `pr-security-linter` to avoid any confusion with OpenAI’s official Codex Security offerings. This is an independent open-source project and is not affiliated with, endorsed by, or maintained by OpenAI.
 
-**PR Security Linter** is a fast, lightweight security and secret scanner designed for **Pull Requests**, **Git pre-commit hooks**, and **local repositories**. It acts as a quick **first line of defense** to catch hardcoded credentials, suspicious malware/webshell patterns, and dangerous API usages before code gets merged.
+**PR Security Linter** is a fast, lightweight security and secret analysis engine designed for **Pull Requests**, **Git pre-commit hooks**, and **offline local repositories**. It serves as an instant **first line of defense** to catch hardcoded credentials, suspicious malware/webshell patterns, and dangerous API usages before code gets committed or merged.
 
 ---
 
 ## 🎯 What PR Security Linter Is (and Isn't)
 
-- ✅ **A Fast First-Line Filter:** Runs in milliseconds locally or on CI without requiring heavy infrastructure or cloud dependencies.
-- ✅ **Offline-First:** Audits local diffs or directory trees completely offline without sending code over the network.
-- ✅ **Multi-Format Reporting:** Generates clean Markdown summary tables, interactive HTML dashboards, SARIF 2.1.0 for GitHub Security tab integration, JSON, and SVG status badges.
-- ℹ️ **Optional AI Triage:** Can optionally invoke OpenAI models to summarize diffs and suggest GitHub code replacements if an API key is provided.
-- ❌ **Not a Deep SAST:** This tool uses heuristic pattern matching and is **not** a full AST-based data-flow analyzer. It does **not** replace mature deep SAST tools like **Semgrep**, **CodeQL**, or **SonarQube**.
+- ✅ **Fast Multi-Layer First-Line Filter:** Runs deterministically in sub-second execution (< 50ms) without requiring heavy server infrastructure or cloud dependencies.
+- ✅ **Python AST Analysis:** Standard library AST-aware detection for Python distinguishing dynamic code execution from constant safe literals and `ast.literal_eval()`.
+- ✅ **Offline-First & Privacy-Focused:** Audits local file trees and git diffs completely offline. Zero code is sent across the network.
+- ✅ **Context-Aware Source Processing:** Strips inline comments (`#`, `//`, `/* */`, `--`) and excludes documentation strings to reduce false alarms.
+- ✅ **Multi-Format Reporting:** Generates Markdown summary tables, interactive Dark Mode HTML5 dashboards, OASIS SARIF 2.1.0 (with per-rule CWE mappings for GitHub Code Scanning), JSON, and SVG status badges.
+- ℹ️ **Optional AI Triage:** Can optionally invoke OpenAI models (`gpt-4o-mini`) for advisory remediation summaries when `OPENAI_API_KEY` is explicitly configured.
+- ❌ **Not a Full Semantic SAST:** While Python uses AST analysis and multi-language rules use lexical context filtering, this tool does **not** perform whole-program inter-procedural taint/data-flow analysis. It does **not** replace deep SAST platforms like **Semgrep** or **CodeQL**.
+
+---
+
+## 🏗️ Architecture
+
+```
+Input Sources (Local Path / Git Diff / Staged Diff / PR Webhook)
+       │
+       ▼
+Source Filtering & Ignore Engine (*.min.js, *.lock, dist/, vendor/)
+       │
+       ▼
+Context Extraction & Multi-Layer Analyzers
+ ├── Python AST Analyzer (ast.NodeVisitor)
+ ├── Deterministic Regex Signatures (Secrets, Malware, Language Sinks)
+ └── Optional AI Review Provider (OpenAI Triage)
+       │
+       ▼
+Finding Normalization & Deduplication (Stable Rule IDs & CWEs)
+       │
+       ▼
+Reporting Layer (Console Matrix, SARIF 2.1.0, HTML5 Dashboard, Badges)
+```
+
+See [`docs/architecture.md`](docs/architecture.md) for detailed pipeline specifications and [`THREAT_MODEL.md`](THREAT_MODEL.md) for security boundaries.
 
 ---
 
 ## 🔍 Supported Checks & Heuristics
 
-| Category | Checks & Targets | Description |
-| :--- | :--- | :--- |
-| **Secrets & Keys** | AWS, GitHub tokens, Private keys, API keys, Passwords | Detects common plaintext secret assignments and masks values in reports (`AKIA...LE12`). |
-| **Malware & Webshells** | Obfuscated PHP payloads, Reverse shells, Piped shells, Encoded PowerShell | Catches dangerous signatures like `eval(base64_decode(...))`, `/dev/tcp` shells, `nc -e`, `curl \| bash`, and suspicious executables (`.exe`, `.dll`, `.so`). |
-| **Python** | `eval()`, `exec()`, `subprocess(shell=True)`, `pickle.loads()` | Flags arbitrary code execution and command injection risks. |
-| **JavaScript / TypeScript** | `dangerouslySetInnerHTML` | Warns about unescaped React/DOM cross-site scripting (XSS) vectors. |
-| **Go** | `fmt.Sprintf` in SQL queries, `unsafe.Pointer` | Flags string concatenation in SQL queries and unconstrained memory operations. |
-| **Rust** | `unsafe { ... }` blocks | Highlights memory safety boundary escapes in Rust code. |
-| **Java** | `Runtime.exec`, `ProcessBuilder`, `XMLDecoder`, Concatenated SQL | Flags command execution, insecure deserialization, and SQL concatenation. |
-| **PHP** | `system()`, `shell_exec()`, `passthru()`, `unserialize()` | Catches OS command execution and object injection risks. |
-| **C / C++** | `gets()`, `strcpy()`, `strcat()`, unbounded `sprintf()` | Flags legacy unsafe functions prone to buffer overflows. |
-
-> **Smart Comment Filtering:** Language vulnerability patterns automatically ignore code comments (`#`, `//`, `/* */`, `--`) and strip inline comments to minimize false positives.
+| Category | Rule ID Prefix | Checks & Targets | Detection Mechanism |
+| :--- | :---: | :--- | :--- |
+| **Secrets & Keys** | `SEC-*` | AWS access keys, GitHub PATs, unencrypted private keys, API tokens, passwords | Deterministic Regex + Automatic Value Masking |
+| **Malware & Webshells** | `MAL-*` | Obfuscated PHP webshells, `/dev/tcp` reverse shells, netcat listeners, piped curl shells (`curl \| bash`), encoded PowerShell | Structural Regex Signatures |
+| **Python** | `PY-*` | Dynamic `eval()`/`exec()`, `subprocess(shell=True)`, `pickle.loads()` | **Python AST Analyzer** (standard library `ast`) |
+| **JavaScript / TypeScript** | `JS-*` | React `dangerouslySetInnerHTML` | Context-aware Sink Filter |
+| **Go** | `GO-*` | SQL injection via `fmt.Sprintf`, `unsafe.Pointer` memory manipulation | Context-aware Sink Filter |
+| **Rust** | `RUST-*` | `unsafe { ... }` blocks escaping borrow checker guarantees | Context-aware Sink Filter |
+| **Java** | `JAVA-*` | `Runtime.exec`, `ProcessBuilder`, `XMLDecoder` RCE, concatenated SQL queries | Context-aware Sink Filter |
+| **PHP** | `PHP-*` | `system()`, `shell_exec()`, `passthru()`, `unserialize()` object injection | Context-aware Sink Filter |
+| **C / C++** | `CPP-*` | Legacy unsafe functions (`gets()`, unbounded `strcpy()`, `strcat()`, `sprintf()`) | Context-aware Sink Filter |
 
 ---
 
@@ -45,10 +70,14 @@
 ### 1. Python Package (`pip`)
 
 ```bash
-# Install from local clone or source
+# Clone the repository
+git clone https://github.com/knmt1219/pr-security-linter.git
+cd pr-security-linter
+
+# Install in editable mode
 pip install -e .
 
-# With optional AI triage support
+# Install with optional AI triage dependencies
 pip install -e .[ai]
 ```
 
@@ -75,6 +104,8 @@ pr-security-linter --install-hook
 
 ### Local CLI
 
+Both `pr-security-linter` and `codex-security-linter` commands are supported:
+
 ```bash
 # Scan a directory or single file offline
 pr-security-linter --path ./src
@@ -85,11 +116,14 @@ pr-security-linter --local
 # Scan staged changes before committing
 pr-security-linter --staged
 
-# Export interactive HTML dashboard and SARIF
+# Export interactive HTML dashboard and SARIF 2.1.0
 pr-security-linter --path ./src --html report.html --sarif results.sarif
 
 # Enforce fail-on threshold (exit code 1 on HIGH or CRITICAL findings)
 pr-security-linter --path ./src --fail-on HIGH
+
+# Run the benchmark & regression evaluation suite
+pr-security-linter benchmark
 ```
 
 ### GitHub Actions Integration
@@ -106,6 +140,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  security-events: write
 
 jobs:
   security-scan:
@@ -136,6 +171,46 @@ docker run --rm -v "$(pwd):/app/repo" -w /app/repo pr-security-linter:v0.9.0 --p
 
 ---
 
+## 📊 Benchmark & Evaluation Suite
+
+PR Security Linter includes a reproducible benchmark corpus (`benchmarks/`) measuring real detection performance:
+
+```bash
+pr-security-linter benchmark
+```
+
+```
+================================================================================
+ PR SECURITY LINTER BENCHMARK & REGRESSION EVALUATION
+================================================================================
+Fixture                          | Lines  | Exp  | Det  | TP  | FP  | FN  | Time (ms)
+--------------------------------------------------------------------------------
+secrets/sample_secrets.py        | 4      | 3    | 3    | 3   | 0   | 0   | 1.70    
+python/sample_vulns.py           | 10     | 3    | 3    | 3   | 0   | 0   | 0.82    
+javascript/sample_xss.jsx        | 6      | 1    | 1    | 1   | 0   | 0   | 0.60    
+java/sample_vulns.java           | 11     | 3    | 3    | 3   | 0   | 0   | 0.78    
+php/sample_vulns.php             | 6      | 2    | 2    | 2   | 0   | 0   | 0.66    
+go/sample_vulns.go               | 14     | 2    | 2    | 2   | 0   | 0   | 0.88    
+rust/sample_vulns.rs             | 5      | 1    | 1    | 1   | 0   | 0   | 1.98    
+c/sample_vulns.c                 | 9      | 3    | 3    | 3   | 0   | 0   | 1.22    
+safe/safe_examples.py            | 23     | 0    | 0    | 0   | 0   | 0   | 1.56    
+safe/safe_examples.js            | 8      | 0    | 0    | 0   | 0   | 0   | 1.03    
+================================================================================
+SUMMARY METRICS:
+  * Total Fixtures Scanned : 10
+  * Total Lines Scanned    : 96
+  * True Positives (TP)    : 18
+  * False Positives (FP)   : 0
+  * False Negatives (FN)   : 0
+  * Precision              : 100.00%
+  * Recall                 : 100.00%
+  * F1 Score               : 100.00%
+  * Total Execution Time   : 12.10ms
+================================================================================
+```
+
+---
+
 ## 🎛️ CLI Reference
 
 | Option | Type | Description |
@@ -143,6 +218,7 @@ docker run --rm -v "$(pwd):/app/repo" -w /app/repo pr-security-linter:v0.9.0 --p
 | `--path <path>` | String | Scan a local file or recursive directory offline without git. |
 | `--local` | Flag | Scan uncommitted changes in local git repository (`git diff`). |
 | `--staged` | Flag | Scan staged git changes (`git diff --cached`). |
+| `--benchmark` | Flag | Run evaluation benchmark against verified fixture corpus. |
 | `--config <path>` | String | Path to custom YAML configuration file (default: `.pr-security.yml`). |
 | `--fail-on <level>` | Choice | Exit code 1 if findings meet or exceed severity (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`). |
 | `--strict` | Flag | Shorthand for `--fail-on HIGH`. |
@@ -157,8 +233,6 @@ docker run --rm -v "$(pwd):/app/repo" -w /app/repo pr-security-linter:v0.9.0 --p
 ---
 
 ## ⚙️ Configuration (`.pr-security.yml`)
-
-Create a `.pr-security.yml` file in your repository root:
 
 ```yaml
 version: 1.0
@@ -189,26 +263,28 @@ rules:
 | Feature / Capability | **PR Security Linter** | **Gitleaks / Trufflehog** | **Semgrep / CodeQL** |
 | :--- | :---: | :---: | :---: |
 | **Primary Focus** | PR Diff & Fast Linter | Dedicated Secret Detection | Deep Semantic SAST & AST |
-| **Execution Speed** | Sub-second (< 100ms) | Fast | Slower (seconds to minutes) |
+| **Execution Speed** | Sub-second (< 50ms) | Fast | Slower (seconds to minutes) |
 | **Setup Complexity** | Zero-config / Single binary | Minimal | Moderate to High |
-| **Secret Scanning** | Basic Regex Heuristics | Advanced Entropy & Validators | Via Rulesets |
-| **Malware / Webshell Rules** | Built-in Heuristics | No | Custom Rules |
-| **AST / Data Flow Analysis** | No | No | Yes |
+| **Secret Scanning** | Regex Heuristics + Masking | Advanced Entropy & Validators | Via Rulesets |
+| **Malware / Webshell Rules** | Built-in Signatures | No | Custom Rules |
+| **Python AST Analysis** | Built-in (`ast.NodeVisitor`) | No | Yes |
 | **Interactive HTML Reports** | Built-in | No (CLI/JSON) | Cloud or SARIF viewers |
 
 ---
 
 ## ⚠️ Limitations & Honest Disclosures
 
-1. **Regex-Based Detection:** Heuristic checks match text patterns. While comments and common ignore rules are applied, heuristics can miss obfuscated code or flag benign usages.
-2. **Not a Data-Flow Engine:** PR Security Linter does not construct control flow graphs (CFGs) or track tainted variables from sources to sinks.
-3. **Defense in Depth:** We strongly recommend using PR Security Linter alongside dedicated secret management tools and deep semantic SAST analyzers (such as CodeQL or Semgrep).
+1. **First-Line Heuristic & Syntax Scope:** Language checks outside of Python AST rely on lexical sink pattern matching and comment filtering. They may flag safe dynamic patterns or miss deeply obfuscated payloads.
+2. **Not a Data-Flow Engine:** PR Security Linter does not construct control flow graphs (CFGs) or perform whole-program taint analysis across multiple functions or modules.
+3. **Defense in Depth:** PR Security Linter is designed to complement, rather than replace, dedicated secret vaults and deep semantic SAST analyzers (such as CodeQL or Semgrep).
 
 ---
 
-## 🤝 Contributing
+## 🤝 Contributing & Security
 
-We welcome contributions! Please review our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).
+- **Contributing:** Please review our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).
+- **Security Disclosures:** For responsible disclosure of security vulnerabilities in this tool, see [SECURITY.md](SECURITY.md).
+- **Threat Model:** Consult [THREAT_MODEL.md](THREAT_MODEL.md) for data flow and trust assumptions.
 
 ---
 

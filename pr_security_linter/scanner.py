@@ -4,24 +4,20 @@ import argparse
 import json
 import os
 import pathlib
-import re
 import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from . import __version__
+from .diff import chunk_diff_smart, count_scanned_lines
+from .engine import SecurityEngine
+from .models import Finding, Severity
 from .patterns import (
     COMMON_SECRET_PATTERNS,
-    IGNORE_DIR_NAMES,
     LANGUAGE_VULN_PATTERNS,
     MALWARE_PATTERNS,
     SEVERITY_RANKS,
-    SUSPICIOUS_EXECUTABLE_EXTS,
-    is_comment_line,
-    is_ignored_file,
-    mask_sensitive_value,
-    strip_inline_comment,
 )
 from .reporters import (
     build_markdown_summary_table,
@@ -33,254 +29,17 @@ from .reporters import (
 
 
 def heuristic_scan_structured(diff_text: str, custom_ignore_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    """Analyze git diff line-by-line for secret leaks, malware signatures, and dangerous API calls."""
-    findings: List[Dict[str, Any]] = []
-    current_file = ""
-    ignoring_current_file = False
-    reported_suspicious_files = set()
-
-    for line in diff_text.splitlines():
-        if line.startswith("diff --git "):
-            parts = line.split()
-            if len(parts) >= 4:
-                current_file = parts[3]
-                clean_name = current_file.lstrip("b/").strip()
-                ignoring_current_file = is_ignored_file(current_file, custom_ignore_paths)
-
-                # Check for suspicious binary or script extensions added
-                if not ignoring_current_file and clean_name not in reported_suspicious_files:
-                    if any(clean_name.lower().endswith(ext) for ext in SUSPICIOUS_EXECUTABLE_EXTS):
-                        reported_suspicious_files.add(clean_name)
-                        findings.append({
-                            "severity": "CRITICAL",
-                            "type": "Suspicious Executable Binary / Script Added",
-                            "score": "9.5",
-                            "confidence": "95%",
-                            "file": clean_name,
-                            "snippet": f"Executable artifact detected: {clean_name}"
-                        })
-            continue
-        elif line.startswith("+++ "):
-            current_file = line[4:].strip()
-            clean_name = current_file.lstrip("b/").strip()
-            ignoring_current_file = is_ignored_file(current_file, custom_ignore_paths)
-            if not ignoring_current_file and clean_name not in reported_suspicious_files:
-                if any(clean_name.lower().endswith(ext) for ext in SUSPICIOUS_EXECUTABLE_EXTS):
-                    reported_suspicious_files.add(clean_name)
-                    findings.append({
-                        "severity": "CRITICAL",
-                        "type": "Suspicious Executable Binary / Script Added",
-                        "score": "9.5",
-                        "confidence": "95%",
-                        "file": clean_name,
-                        "snippet": f"Executable artifact detected: {clean_name}"
-                    })
-            continue
-
-        if ignoring_current_file:
-            continue
-
-        if line.startswith('+') and not line.startswith('+++'):
-            clean_line = line[1:].strip()
-            if not clean_line:
-                continue
-
-            masked_line = mask_sensitive_value(clean_line)
-
-            # 1. Check for secret & credential leaks (checked on entire line including comments/configs)
-            for pattern, desc, score in COMMON_SECRET_PATTERNS:
-                if re.search(pattern, clean_line):
-                    findings.append({
-                        "severity": "CRITICAL",
-                        "type": desc,
-                        "score": score,
-                        "confidence": "99%",
-                        "file": current_file.lstrip("b/"),
-                        "snippet": masked_line[:80]
-                    })
-
-            # 2. Check for malware, webshell, and reverse shell patterns
-            matched_malware = False
-            for pattern, desc, score in MALWARE_PATTERNS:
-                if re.search(pattern, clean_line):
-                    matched_malware = True
-                    findings.append({
-                        "severity": "CRITICAL",
-                        "type": desc,
-                        "score": score,
-                        "confidence": "99%",
-                        "file": current_file.lstrip("b/"),
-                        "snippet": masked_line[:80]
-                    })
-
-            # 3. Check for language-specific dangerous APIs
-            # Skip if malware matched or line is a comment to prevent false positives
-            if not matched_malware and not is_comment_line(clean_line):
-                code_part = strip_inline_comment(clean_line).strip()
-                if code_part:
-                    for pattern, desc, score in LANGUAGE_VULN_PATTERNS:
-                        if re.search(pattern, code_part):
-                            findings.append({
-                                "severity": "HIGH",
-                                "type": desc,
-                                "score": score,
-                                "confidence": "95%",
-                                "file": current_file.lstrip("b/"),
-                                "snippet": masked_line[:80]
-                            })
-
-    return findings
+    """Analyze git diff line-by-line using rule engine and return serialized findings."""
+    engine = SecurityEngine(custom_ignore_paths=custom_ignore_paths)
+    findings = engine.scan_diff(diff_text)
+    return [f.to_dict() for f in findings]
 
 
 def scan_local_path_offline(target_path: str, custom_ignore_paths: Optional[List[str]] = None) -> Tuple[List[Dict[str, Any]], int]:
-    """Scan a local file or recursively walk a directory without requiring git or network connectivity."""
-    findings: List[Dict[str, Any]] = []
-    lines_scanned = 0
-    target = pathlib.Path(target_path).resolve()
-
-    if not target.exists():
-        print(f"Error: Specified path '{target_path}' does not exist.", file=sys.stderr)
-        return findings, lines_scanned
-
-    files_to_scan: List[pathlib.Path] = []
-    if target.is_file():
-        files_to_scan.append(target)
-    else:
-        for root, dirs, files in os.walk(target):
-            # Prune ignored directories in-place to optimize traversal
-            dirs[:] = [d for d in dirs if d not in IGNORE_DIR_NAMES and not is_ignored_file(d, custom_ignore_paths)]
-            for file in files:
-                file_path = pathlib.Path(root) / file
-                files_to_scan.append(file_path)
-
-    reported_binaries = set()
-
-    for file_path in files_to_scan:
-        try:
-            rel_str = str(file_path.relative_to(target.parent if target.is_file() else target)).replace("\\", "/")
-        except ValueError:
-            rel_str = file_path.name
-
-        if is_ignored_file(rel_str, custom_ignore_paths):
-            continue
-
-        # Flag suspicious binary or executable artifacts
-        if any(file_path.name.lower().endswith(ext) for ext in SUSPICIOUS_EXECUTABLE_EXTS):
-            if rel_str not in reported_binaries:
-                reported_binaries.add(rel_str)
-                findings.append({
-                    "severity": "CRITICAL",
-                    "type": "Suspicious Executable Binary / Script Added",
-                    "score": "9.5",
-                    "confidence": "95%",
-                    "file": rel_str,
-                    "snippet": f"Executable artifact detected: {file_path.name}"
-                })
-            continue
-
-        try:
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                lines = f.readlines()
-        except Exception:
-            continue
-
-        for line_num, line in enumerate(lines, 1):
-            lines_scanned += 1
-            clean_line = line.strip()
-            if not clean_line:
-                continue
-
-            masked_line = mask_sensitive_value(clean_line)
-
-            # 1. Check secrets (on full line)
-            for pattern, desc, score in COMMON_SECRET_PATTERNS:
-                if re.search(pattern, clean_line):
-                    findings.append({
-                        "severity": "CRITICAL",
-                        "type": desc,
-                        "score": score,
-                        "confidence": "99%",
-                        "file": f"{rel_str}:{line_num}",
-                        "snippet": masked_line[:80]
-                    })
-
-            # 2. Check malware & webshells
-            matched_malware = False
-            for pattern, desc, score in MALWARE_PATTERNS:
-                if re.search(pattern, clean_line):
-                    matched_malware = True
-                    findings.append({
-                        "severity": "CRITICAL",
-                        "type": desc,
-                        "score": score,
-                        "confidence": "99%",
-                        "file": f"{rel_str}:{line_num}",
-                        "snippet": masked_line[:80]
-                    })
-
-            # 3. Check language vulnerabilities (ignore full-line comments and strip inline comments)
-            if not matched_malware and not is_comment_line(clean_line):
-                code_part = strip_inline_comment(clean_line).strip()
-                if code_part:
-                    for pattern, desc, score in LANGUAGE_VULN_PATTERNS:
-                        if re.search(pattern, code_part):
-                            findings.append({
-                                "severity": "HIGH",
-                                "type": desc,
-                                "score": score,
-                                "confidence": "95%",
-                                "file": f"{rel_str}:{line_num}",
-                                "snippet": masked_line[:80]
-                            })
-
-    return findings, lines_scanned
-
-
-def chunk_diff_smart(diff_text: str, max_chars: int = 12000) -> str:
-    """Prioritize high-risk file diffs when diff length exceeds context limits."""
-    if len(diff_text) <= max_chars:
-        return diff_text
-
-    file_diffs = re.split(r'(?=diff --git )', diff_text)
-    prioritized_hunks: List[str] = []
-    other_hunks: List[str] = []
-
-    high_risk_exts = ('.py', '.go', '.rs', '.js', '.ts', '.java', '.php', '.c', '.cpp', '.h', '.hpp', '.rb', '.sh', '.yml', '.yaml')
-
-    for chunk in file_diffs:
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-        first_line = chunk.splitlines()[0] if chunk.splitlines() else ""
-        is_high_risk = any(first_line.endswith(ext) or ext in first_line for ext in high_risk_exts)
-        has_suspicious_patterns = any(
-            re.search(p, chunk) for p, _, _ in COMMON_SECRET_PATTERNS + MALWARE_PATTERNS + LANGUAGE_VULN_PATTERNS
-        )
-
-        if is_high_risk or has_suspicious_patterns:
-            prioritized_hunks.append(chunk)
-        else:
-            other_hunks.append(chunk)
-
-    selected: List[str] = []
-    current_length = 0
-
-    for h in prioritized_hunks + other_hunks:
-        if current_length + len(h) <= max_chars:
-            selected.append(h)
-            current_length += len(h)
-        else:
-            remaining = max_chars - current_length
-            if remaining > 200:
-                selected.append(h[:remaining] + "\n... [diff truncated for length]")
-            break
-
-    return "\n\n".join(selected) if selected else diff_text[:max_chars]
-
-
-def count_scanned_lines(diff_text: str) -> int:
-    """Count total added code lines analyzed from diff."""
-    return sum(1 for line in diff_text.splitlines() if line.startswith('+') and not line.startswith('+++'))
+    """Scan a local file or recursively walk a directory offline."""
+    engine = SecurityEngine(custom_ignore_paths=custom_ignore_paths)
+    findings, lines_scanned = engine.scan_path(target_path)
+    return [f.to_dict() for f in findings], lines_scanned
 
 
 def parse_simple_yaml(text: str) -> Dict[str, Any]:
@@ -326,7 +85,7 @@ def parse_simple_yaml(text: str) -> Dict[str, Any]:
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load configuration from specified path or standard configuration files."""
     candidate_paths = [config_path] if config_path else [".pr-security.yml", ".pr-security-linter.yml", ".codex-security.yml"]
-    
+
     for path in candidate_paths:
         if path and os.path.exists(path):
             try:
@@ -419,31 +178,9 @@ def post_comment(repo_full_name: str, pr_number: int, github_token: str, body: s
 
 def audit_diff_with_ai(diff_text: str, api_key: str, model_name: str = "gpt-4o-mini") -> str:
     """Optional LLM-based triage to review code diff and suggest remediation patches."""
-    try:
-        from openai import OpenAI
-    except ImportError:
-        return "*(OpenAI SDK not installed. Run `pip install openai` to enable optional AI remediation suggestions)*"
-
-    optimized_diff = chunk_diff_smart(diff_text, max_chars=12000)
-    client = OpenAI(api_key=api_key)
-    prompt = (
-        "You are an application security reviewer auditing an open-source Pull Request.\n"
-        "Analyze the following code diff and provide a concise review:\n"
-        "1. [SEVERITY: CRITICAL/HIGH/MEDIUM/LOW] (Include estimated confidence % and CVSS score).\n"
-        "2. Concrete remediation code patches formatted as GitHub suggestions (```suggestion ... ```) when applicable.\n"
-        "3. Best practice recommendation.\n"
-        "If no vulnerabilities are detected, state: 'No security vulnerabilities detected.'\n\n"
-        f"Diff:\n```diff\n{optimized_diff}\n```"
-    )
-    res = client.chat.completions.create(
-        model=model_name,
-        messages=[
-            {"role": "system", "content": "You are a concise security code reviewer for pull requests."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.1,
-    )
-    return res.choices[0].message.content or ""
+    from .analyzers.ai import AIReviewProvider
+    provider = AIReviewProvider(api_key=api_key, model=model_name)
+    return provider.review_diff(diff_text)
 
 
 def main() -> None:
@@ -459,12 +196,18 @@ def main() -> None:
         except Exception:
             pass
 
+    if len(sys.argv) > 1 and sys.argv[1] == "benchmark":
+        from .benchmark import main as run_benchmark_cli
+        run_benchmark_cli()
+        return
+
     start_time = time.time()
     parser = argparse.ArgumentParser(description=f"PR Security Linter CLI & GitHub Action (v{__version__})")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--local", action="store_true", help="Run security audit on local git diff")
     parser.add_argument("--staged", action="store_true", help="Run security audit on staged git changes (git diff --cached)")
     parser.add_argument("--path", type=str, help="Scan a local file or recursive directory offline without git dependency")
+    parser.add_argument("--benchmark", action="store_true", help="Run evaluation benchmark against verified fixture corpus")
     parser.add_argument("--sarif", type=str, help="Export scan results to OASIS SARIF format")
     parser.add_argument("--json", type=str, help="Export scan results to JSON format")
     parser.add_argument("--html", type=str, help="Export interactive HTML security dashboard report")
@@ -480,6 +223,11 @@ def main() -> None:
         help="Exit with code 1 if findings meet or exceed the specified severity threshold",
     )
     args = parser.parse_args()
+
+    if args.benchmark:
+        from .benchmark import main as run_benchmark_cli
+        run_benchmark_cli()
+        return
 
     if args.install_hook:
         install_pre_commit_hook()

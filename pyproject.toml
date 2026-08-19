@@ -47,4 +47,4 @@ codex-security-linter = "pr_security_linter.scanner:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["pr_security_linter*"]
+include = ["pr_security_linter*", "codex_security_linter*"]

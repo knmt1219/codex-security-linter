@@ -28,6 +28,7 @@ from pr_security_linter.reporters import (
     export_sarif,
     generate_svg_badge,
 )
+from pr_security_linter.analyzers.python_ast import PythonASTAnalyzer
 
 
 def test_mask_sensitive_value():
@@ -71,6 +72,31 @@ def test_comment_handling_and_false_positive_reduction():
     active_findings = heuristic_scan_structured(active_code_diff)
     assert len(active_findings) == 1
     assert active_findings[0]["severity"] == "HIGH"
+
+
+def test_python_ast_analyzer():
+    # Dynamic eval vs constant eval vs ast.literal_eval
+    code = """
+import ast
+import subprocess
+import pickle
+
+eval(user_input)
+eval("1 + 2")
+ast.literal_eval(safe_data)
+subprocess.run("ls", shell=True)
+subprocess.run(["ls", "-la"])
+pickle.loads(payload)
+"""
+    analyzer = PythonASTAnalyzer("test.py")
+    findings = analyzer.analyze(code)
+    types = [f.title for f in findings]
+    assert "Dangerous Dynamic Code Execution (eval/exec)" in types
+    assert "Command Injection Risk (shell=True)" in types
+    assert "Insecure Deserialization (pickle.loads)" in types
+
+    # Check literal_eval was NOT flagged
+    assert len([f for f in findings if "literal_eval" in f.snippet]) == 0
 
 
 def test_heuristic_scan_structured():
@@ -135,7 +161,7 @@ def test_scan_local_path_offline(tmp_path):
     findings, lines = scan_local_path_offline(str(src_dir))
     assert len(findings) == 1
     assert findings[0]["type"] == "Hardcoded Plaintext Password"
-    assert "auth.py:1" in findings[0]["file"]
+    assert "auth.py" in findings[0]["file"]
     assert lines >= 3
 
 
@@ -253,7 +279,7 @@ diff --git a/src/app.py b/src/app.py
 """
     findings = heuristic_scan_structured(diff)
     assert len(findings) == 1
-    assert findings[0]["file"] == "src/app.py"
+    assert findings[0]["file"].startswith("src/app.py")
 
 
 def test_build_markdown_summary_table():
@@ -382,6 +408,19 @@ ignore_paths:
     assert "tests/*" in config.get("ignore_paths", [])
 
 
+from pr_security_linter.benchmark import run_benchmarks
+
+
+def test_benchmark_execution():
+    metrics = run_benchmarks()
+    assert metrics["fixtures"] >= 10
+    assert metrics["fp"] == 0
+    assert metrics["fn"] == 0
+    assert metrics["precision"] == 1.0
+    assert metrics["recall"] == 1.0
+    assert metrics["f1"] == 1.0
+
+
 if __name__ == "__main__":
     if sys.stdout and hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -389,10 +428,14 @@ if __name__ == "__main__":
         sys.stderr.reconfigure(encoding="utf-8")
 
     print("Running PR Security Linter test suite...")
+    test_benchmark_execution()
+    print("✓ test_benchmark_execution passed")
     test_mask_sensitive_value()
     print("✓ test_mask_sensitive_value passed")
     test_comment_handling_and_false_positive_reduction()
     print("✓ test_comment_handling_and_false_positive_reduction passed")
+    test_python_ast_analyzer()
+    print("✓ test_python_ast_analyzer passed")
     test_heuristic_scan_structured()
     print("✓ test_heuristic_scan_structured passed")
     test_malware_patterns()

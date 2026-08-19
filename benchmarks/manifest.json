@@ -1,0 +1,54 @@
+{
+  "fixtures": [
+    {
+      "file": "secrets/sample_secrets.py",
+      "expected_rule_ids": ["SEC-AWS-001", "SEC-GH-001", "SEC-PASS-001"],
+      "expected_count": 3
+    },
+    {
+      "file": "python/sample_vulns.py",
+      "expected_rule_ids": ["PY-DYN-001", "PY-CMD-001", "PY-DESERIAL-001"],
+      "expected_count": 3
+    },
+    {
+      "file": "javascript/sample_xss.jsx",
+      "expected_rule_ids": ["JS-XSS-001"],
+      "expected_count": 1
+    },
+    {
+      "file": "java/sample_vulns.java",
+      "expected_rule_ids": ["JAVA-CMD-001", "JAVA-DESERIAL-001", "JAVA-SQLI-001"],
+      "expected_count": 3
+    },
+    {
+      "file": "php/sample_vulns.php",
+      "expected_rule_ids": ["PHP-CMD-001", "PHP-DESERIAL-001"],
+      "expected_count": 2
+    },
+    {
+      "file": "go/sample_vulns.go",
+      "expected_rule_ids": ["GO-SQLI-001", "GO-MEM-001"],
+      "expected_count": 2
+    },
+    {
+      "file": "rust/sample_vulns.rs",
+      "expected_rule_ids": ["RUST-UNSAFE-001"],
+      "expected_count": 1
+    },
+    {
+      "file": "c/sample_vulns.c",
+      "expected_rule_ids": ["CPP-BOF-GETS-001", "CPP-BOF-STRCPY-001", "CPP-FMT-SPRINTF-001"],
+      "expected_count": 3
+    },
+    {
+      "file": "safe/safe_examples.py",
+      "expected_rule_ids": [],
+      "expected_count": 0
+    },
+    {
+      "file": "safe/safe_examples.js",
+      "expected_rule_ids": [],
+      "expected_count": 0
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import html
 import json
 from typing import Any, Dict, List
 from . import __version__
+from .rules.registry import ALL_RULES, RULE_REGISTRY
 
 
 def build_markdown_summary_table(findings: List[Dict[str, Any]], lines_scanned: int = 0, duration_ms: float = 0.0) -> str:
@@ -17,11 +18,13 @@ def build_markdown_summary_table(findings: List[Dict[str, Any]], lines_scanned: 
         return metrics_line + "✅ **Security Status:** No vulnerabilities or secret leaks detected."
 
     table = metrics_line
-    table += "| Severity | Vulnerability Type | CVSS | Confidence | Code Snippet |\n"
-    table += "| :--- | :--- | :---: | :---: | :--- |\n"
+    table += "| Severity | Vulnerability Type | Rule ID | Score | Confidence | Code Snippet |\n"
+    table += "| :--- | :--- | :---: | :---: | :---: | :--- |\n"
     for f in findings:
         badge = "🔴 `CRITICAL`" if f.get("severity") == "CRITICAL" else "🟠 `HIGH`"
-        table += f"| {badge} | {f.get('type')} | **{f.get('score')}** | {f.get('confidence')} | `{f.get('snippet')}` |\n"
+        rule_id = f.get("rule_id", "GEN-001")
+        score = f.get("score", "N/A")
+        table += f"| {badge} | {f.get('type')} | `{rule_id}` | **{score}** | {f.get('confidence')} | `{f.get('snippet')}` |\n"
     return table
 
 
@@ -62,15 +65,21 @@ def export_html(findings: List[Dict[str, Any]], output_path: str = "security-rep
             sev = f.get("severity", "LOW").upper()
             badge_class = "badge-critical" if sev == "CRITICAL" else ("badge-high" if sev == "HIGH" else "badge-medium")
             safe_type = html.escape(str(f.get("type", "")))
+            safe_rule = html.escape(str(f.get("rule_id", "GEN-001")))
             safe_score = html.escape(str(f.get("score", "N/A")))
             safe_conf = html.escape(str(f.get("confidence", "N/A")))
             safe_snip = html.escape(str(f.get("snippet", "")))
             safe_file = html.escape(str(f.get("file", "diff")))
+            safe_cwe = html.escape(str(f.get("cwe", "")))
+            cwe_badge = f'<span class="cwe-badge">{safe_cwe}</span>' if safe_cwe else ""
             table_rows += f"""
             <tr data-severity="{sev}">
                 <td><span class="badge {badge_class}">{sev}</span></td>
-                <td><strong>{safe_type}</strong><br><small class="file-path">📁 {safe_file}</small></td>
-                <td><span class="cvss-score">{safe_score}</span></td>
+                <td>
+                    <strong>{safe_type}</strong> {cwe_badge}<br>
+                    <small class="file-path">📁 {safe_file}</small> &bull; <small class="rule-id"><code>{safe_rule}</code></small>
+                </td>
+                <td><span class="score-badge">{safe_score}</span></td>
                 <td><span class="conf-badge">{safe_conf}</span></td>
                 <td><code>{safe_snip}</code></td>
             </tr>
@@ -148,7 +157,9 @@ def export_html(findings: List[Dict[str, Any]], output_path: str = "security-rep
         .badge-high {{ background: rgba(249, 115, 22, 0.15); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.4); }}
         .badge-medium {{ background: rgba(234, 179, 8, 0.15); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); }}
         .file-path {{ color: var(--text-muted); font-size: 0.78rem; }}
-        .cvss-score {{ font-weight: 800; color: #e2e8f0; font-size: 0.95rem; }}
+        .rule-id code {{ display: inline; padding: 0.1rem 0.3rem; font-size: 0.75rem; color: #a78bfa; background: rgba(167, 139, 250, 0.1); border: 1px solid rgba(167, 139, 250, 0.25); }}
+        .cwe-badge {{ display: inline-block; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.72rem; color: #94a3b8; background: #1e293b; margin-left: 0.4rem; }}
+        .score-badge {{ font-weight: 800; color: #e2e8f0; font-size: 0.95rem; }}
         .conf-badge {{ background: var(--bg-card); padding: 0.2rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; color: #38bdf8; }}
         code {{ background: #070c18; border: 1px solid var(--border-color); color: #38bdf8; padding: 0.25rem 0.5rem; border-radius: 0.35rem; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85rem; word-break: break-all; display: block; }}
         
@@ -204,7 +215,7 @@ def export_html(findings: List[Dict[str, Any]], output_path: str = "security-rep
                     <tr>
                         <th style="width: 110px;">Severity</th>
                         <th>Vulnerability & File</th>
-                        <th style="width: 90px;">CVSS</th>
+                        <th style="width: 80px;">Score</th>
                         <th style="width: 100px;">Confidence</th>
                         <th>Code Snippet</th>
                     </tr>
@@ -256,7 +267,71 @@ def export_html(findings: List[Dict[str, Any]], output_path: str = "security-rep
 
 
 def export_sarif(findings: List[Dict[str, Any]], output_path: str = "results.sarif") -> None:
-    """Export findings to OASIS SARIF 2.1.0 format."""
+    """Export findings to valid OASIS SARIF 2.1.0 with individual per-rule definitions."""
+    sarif_rules: List[Dict[str, Any]] = []
+    seen_rule_ids = set()
+
+    for rule in ALL_RULES:
+        if rule.id not in seen_rule_ids:
+            seen_rule_ids.add(rule.id)
+            sarif_rules.append({
+                "id": rule.id,
+                "name": rule.name,
+                "shortDescription": {"text": rule.name},
+                "fullDescription": {"text": rule.description},
+                "help": {
+                    "text": (
+                        f"{rule.description}\n\n"
+                        + (f"Remediation: {rule.remediation}\n" if rule.remediation else "")
+                        + (f"CWE: {rule.cwe}\n" if rule.cwe else "")
+                    )
+                },
+                "properties": {
+                    "category": rule.category.value,
+                    "cwe": rule.cwe or "",
+                    "security-severity": str(rule.risk_score),
+                }
+            })
+
+    results: List[Dict[str, Any]] = []
+    for f in findings:
+        rule_id = str(f.get("rule_id", "GEN-001"))
+        sev = str(f.get("severity", "LOW")).upper()
+        level = "error" if sev in ("CRITICAL", "HIGH") else ("warning" if sev == "MEDIUM" else "note")
+
+        file_val = str(f.get("file", "unknown"))
+        line_num = int(f.get("line", 1))
+        if ":" in file_val:
+            parts = file_val.rsplit(":", 1)
+            file_uri = parts[0]
+            try:
+                line_num = int(parts[1])
+            except ValueError:
+                file_uri = file_val
+        else:
+            file_uri = file_val
+
+        location_entry = {
+            "physicalLocation": {
+                "artifactLocation": {
+                    "uri": file_uri.replace("\\", "/"),
+                    "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                    "startLine": max(1, line_num)
+                }
+            }
+        }
+
+        results.append({
+            "ruleId": rule_id,
+            "level": level,
+            "message": {
+                "text": f"{f.get('type')}: {f.get('snippet')}"
+            },
+            "locations": [location_entry]
+        })
+
     sarif_data = {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
         "version": "2.1.0",
@@ -266,20 +341,10 @@ def export_sarif(findings: List[Dict[str, Any]], output_path: str = "results.sar
                     "name": "PR Security Linter",
                     "version": __version__,
                     "informationUri": "https://github.com/knmt1219/pr-security-linter",
-                    "rules": [{
-                        "id": "PRSEC001",
-                        "name": "SecurityFindingOrSecret",
-                        "shortDescription": {"text": "Potential security flaw, dangerous API, or secret detected in code changes"}
-                    }]
+                    "rules": sarif_rules,
                 }
             },
-            "results": [
-                {
-                    "ruleId": "PRSEC001",
-                    "level": "error" if f.get("severity") in ["CRITICAL", "HIGH"] else "warning",
-                    "message": {"text": f"{f.get('type')} (CVSS: {f.get('score')}) in `{f.get('snippet')}`"}
-                } for f in findings
-            ]
+            "results": results
         }]
     }
     with open(output_path, "w", encoding="utf-8") as f:
